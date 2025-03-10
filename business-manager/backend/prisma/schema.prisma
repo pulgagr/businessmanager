@@ -1,0 +1,77 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Quote {
+  id            Int      @id @default(autoincrement())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  client        Client   @relation(fields: [clientId], references: [id])
+  clientId      Int
+  product       String
+  platform      String
+  status        String
+  cost          Float
+  chargedAmount Float
+  amountPaid    Float   @default(0)
+  paymentMethod String?
+  notes         String?
+  activities    Activity[]
+}
+
+model Client {
+  id        Int      @id @default(autoincrement())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  name      String
+  email     String   @unique
+  phone     String?
+  company   String?
+  status    String   @default("active")
+  idNumber  String?
+  address   String?
+  city      String?
+  state     String?
+  zipCode   String?
+  country   String?
+  taxId     String?
+  quotes    Quote[]
+}
+
+model Activity {
+  id        Int      @id @default(autoincrement())
+  createdAt DateTime @default(now())
+  quote     Quote    @relation(fields: [quoteId], references: [id])
+  quoteId   Int
+  type      String
+  amount    Float
+  status    String
+}
+
+model Settings {
+  id                   Int      @id @default(autoincrement())
+  companyName         String
+  email               String
+  phone               String
+  address             String
+  taxRate             Float
+  currency            String
+  defaultPlatformFee  Float
+  notificationEmail   String
+  autoGenerateInvoices Boolean
+  platformOptions     String[]
+  paymentOptions      String[]
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+}
