@@ -25,6 +25,14 @@ export const getClientById = async (req: Request, res: Response) => {
           orderBy: {
             createdAt: 'desc'
           }
+        },
+        trackings: {
+          include: {
+            quotes: true
+          },
+          orderBy: {
+            createdAt: 'desc'
+          }
         }
       }
     });

@@ -1,6 +1,16 @@
 import { Request, Response } from 'express';
 import { startOfMonth, endOfMonth, parseISO } from 'date-fns';
 import prisma from '../services/db';
+import { Quote, Tracking } from '@prisma/client';
+
+interface TrackingWithRelations extends Tracking {
+  client: {
+    id: number;
+    name: string;
+    company: string | null;
+  };
+  quotes: Quote[];
+}
 
 export const getMonthlySales = async (req: Request, res: Response) => {
   try {
@@ -17,7 +27,8 @@ export const getMonthlySales = async (req: Request, res: Response) => {
       endDate = endOfMonth(now);
     }
 
-    const orders = await prisma.quote.findMany({
+    // Get quotes
+    const quotes = await prisma.quote.findMany({
       where: {
         createdAt: {
           gte: startDate,
@@ -35,7 +46,44 @@ export const getMonthlySales = async (req: Request, res: Response) => {
       }
     });
 
-    res.json(orders);
+    // Get trackings
+    const trackings = await prisma.tracking.findMany({
+      where: {
+        createdAt: {
+          gte: startDate,
+          lte: endDate
+        }
+      },
+      include: {
+        client: true,
+        quotes: true
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    }) as TrackingWithRelations[];
+
+    // Convert trackings to the same format as quotes
+    const trackingOrders = trackings.map((tracking: TrackingWithRelations) => ({
+      id: tracking.id,
+      createdAt: tracking.createdAt,
+      product: tracking.quotes.map((q: Quote) => q.product).join(', '),
+      platform: 'Other',
+      client: tracking.client,
+      orderNumber: tracking.trackingNumber,
+      paymentMethod: 'Bank Transfer',
+      status: 'shipment',
+      cost: tracking.shippingCost,
+      chargedAmount: tracking.totalValue,
+      notes: null
+    }));
+
+    // Combine and sort by date
+    const allOrders = [...quotes, ...trackingOrders].sort((a, b) => 
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+
+    res.json(allOrders);
   } catch (error) {
     console.error('Error fetching monthly sales:', error);
     res.status(500).json({ message: 'Error fetching monthly sales' });
@@ -47,6 +95,24 @@ export const updateOrder = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { product, platform, status, cost, chargedAmount, notes, amountPaid, paymentMethod } = req.body;
     
+    // Check if we need to get the current order details
+    let existingOrder;
+    if (status === 'paid') {
+      existingOrder = await prisma.quote.findUnique({
+        where: { id: parseInt(id) }
+      });
+    }
+    
+    // Determine amount paid based on status
+    let updatedAmountPaid = amountPaid ? parseFloat(amountPaid) : undefined;
+    if (status === 'paid') {
+      // If status is paid, set amountPaid to chargedAmount
+      const amount = chargedAmount 
+        ? parseFloat(chargedAmount) 
+        : existingOrder ? existingOrder.chargedAmount : 0;
+      updatedAmountPaid = amount;
+    }
+    
     const order = await prisma.quote.update({
       where: { id: parseInt(id) },
       data: {
@@ -55,7 +121,7 @@ export const updateOrder = async (req: Request, res: Response) => {
         status,
         cost: cost ? parseFloat(cost) : undefined,
         chargedAmount: chargedAmount ? parseFloat(chargedAmount) : undefined,
-        amountPaid: amountPaid ? parseFloat(amountPaid) : undefined,
+        amountPaid: updatedAmountPaid,
         notes,
         paymentMethod
       },
@@ -69,7 +135,7 @@ export const updateOrder = async (req: Request, res: Response) => {
       data: {
         quoteId: order.id,
         type: amountPaid ? 'Partial Payment' : `Order ${status}`,
-        amount: amountPaid ? parseFloat(amountPaid) : (chargedAmount ? parseFloat(chargedAmount) : 0),
+        amount: updatedAmountPaid ? updatedAmountPaid : (chargedAmount ? parseFloat(chargedAmount) : 0),
         status: status === 'paid' ? 'completed' : 'pending'
       }
     });

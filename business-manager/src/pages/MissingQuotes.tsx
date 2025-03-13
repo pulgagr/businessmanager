@@ -91,27 +91,14 @@ const MissingQuotes = () => {
     setEditingQuote({ ...quote });
   };
 
-  const handleInputChange = (field: keyof Quote, value: string | number) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement> | { target: { name: string; value: string } }) => {
     if (!editingQuote) return;
     
-    if (field === 'cost' || field === 'chargedAmount') {
-      const numericValue = typeof value === 'string' ? parseCurrencyInput(value) : value;
-      setEditingQuote(prev => ({
-        ...prev!,
-        [field]: numericValue
-      }));
-    } else if (field === 'clientId') {
-      setEditingQuote(prev => ({
-        ...prev!,
-        clientId: typeof value === 'string' ? parseInt(value, 10) : value
-      }));
-    } else {
-      console.log(`Setting ${field} to:`, value);
-      setEditingQuote(prev => ({
-        ...prev!,
-        [field]: value
-      }));
-    }
+    const { name, value } = e.target;
+    setEditingQuote(prev => ({
+      ...prev!,
+      [name]: name === 'cost' || name === 'chargedAmount' ? parseFloat(value) || 0 : value
+    }));
   };
 
   const handleUpdateQuote = async () => {
@@ -246,7 +233,7 @@ const MissingQuotes = () => {
             name="clientId"
             label="Client"
             value={editingQuote?.clientId || ''}
-            onChange={(e) => handleInputChange('clientId', e.target.value)}
+            onChange={(e) => handleInputChange(e)}
             options={clients.map(client => ({
               value: client.id,
               label: client.name
@@ -260,7 +247,7 @@ const MissingQuotes = () => {
             name="product"
             label="Product"
             value={editingQuote?.product || ''}
-            onChange={(e) => handleInputChange('product', e.target.value)}
+            onChange={(e) => handleInputChange(e)}
             placeholder="Enter product name"
             required
           />
@@ -270,7 +257,7 @@ const MissingQuotes = () => {
             name="platform"
             label="Platform"
             value={editingQuote?.platform || ''}
-            onChange={(e) => handleInputChange('platform', e.target.value)}
+            onChange={(e) => handleInputChange(e)}
             options={platformOptions.map(platform => ({
               value: platform,
               label: platform
@@ -284,7 +271,7 @@ const MissingQuotes = () => {
             name="paymentMethod"
             label="Payment Method"
             value={editingQuote?.paymentMethod || ''}
-            onChange={(e) => handleInputChange('paymentMethod', e.target.value)}
+            onChange={(e) => handleInputChange(e)}
             options={paymentOptions.map(method => ({
               value: method,
               label: method
@@ -299,7 +286,9 @@ const MissingQuotes = () => {
           </label>
           <StatusGroup
             value={editingQuote?.status || 'quote'}
-            onChange={(value: string) => handleInputChange('status', value)}
+            onChange={(value: string) => handleInputChange({
+              target: { name: 'status', value }
+            })}
             options={[
               { value: 'quote', label: 'Quote Needed' },
               { value: 'quoted', label: 'Quoted' },
@@ -316,21 +305,25 @@ const MissingQuotes = () => {
             id="cost"
             name="cost"
             label="Cost"
-            value={editingQuote?.cost || 0}
-            onChange={(value) => handleInputChange('cost', Number(value))}
+            value={editingQuote?.cost.toString() || ''}
+            onChange={handleInputChange}
           />
 
           <CurrencyField
             id="chargedAmount"
             name="chargedAmount"
             label="Charged Amount"
-            value={editingQuote?.chargedAmount || 0}
-            onChange={(value) => handleInputChange('chargedAmount', Number(value))}
+            value={editingQuote?.chargedAmount.toString() || ''}
+            onChange={handleInputChange}
             onPercentageSelect={(percentage: number) => {
               const cost = editingQuote?.cost || 0;
-              const calculatedAmount = (cost * (1 + percentage / 100));
-              handleInputChange('chargedAmount', calculatedAmount);
+              const calculatedAmount = Number((cost * (1 + percentage / 100)).toFixed(2));
+              handleInputChange({
+                target: { name: 'chargedAmount', value: calculatedAmount.toString() }
+              });
             }}
+            selectedPercentage={null}
+            cost={editingQuote?.cost}
           />
         </div>
 
@@ -339,7 +332,7 @@ const MissingQuotes = () => {
           name="notes"
           label="Notes"
           value={editingQuote?.notes || ''}
-          onChange={(e) => handleInputChange('notes', e.target.value)}
+          onChange={(e) => handleInputChange(e)}
           placeholder="Leave any notes here (optional)..."
         />
       </div>
@@ -472,7 +465,7 @@ const MissingQuotes = () => {
                     {quotes.map((quote) => (
                       <tr key={quote.id}>
                         <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">
-                          {quote.client.name}
+                          {quote.client.company}
                         </td>
                         <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
                           {quote.product}

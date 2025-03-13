@@ -1,10 +1,13 @@
-import { useState, useEffect } from 'react';
-import { CheckIcon, XMarkIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/outline';
+import { useState, useEffect, useRef } from 'react';
+import { CheckIcon, XMarkIcon, PlusIcon, TrashIcon, PhotoIcon } from '@heroicons/react/24/outline';
 import { settingsApi, Settings as SettingsType } from '../services/api';
 
 interface ExtendedSettings extends SettingsType {
   platformOptions: string[];
   paymentOptions: string[];
+  defaultPlatformFee: number;
+  notificationEmail: string;
+  autoGenerateInvoices: boolean;
 }
 
 const Settings = () => {
@@ -19,13 +22,15 @@ const Settings = () => {
     notificationEmail: '',
     autoGenerateInvoices: false,
     platformOptions: [],
-    paymentOptions: []
+    paymentOptions: [],
+    logoUrl: ''
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editedSettings, setEditedSettings] = useState<ExtendedSettings | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // New state for adding options
   const [newPlatform, setNewPlatform] = useState('');
@@ -39,7 +44,14 @@ const Settings = () => {
     try {
       setLoading(true);
       const response = await settingsApi.get();
-      setSettings(response.data);
+      setSettings({
+        ...response.data,
+        defaultPlatformFee: response.data.defaultPlatformFee || 0,
+        notificationEmail: response.data.notificationEmail || '',
+        autoGenerateInvoices: response.data.autoGenerateInvoices || false,
+        platformOptions: response.data.platformOptions || [],
+        paymentOptions: response.data.paymentOptions || []
+      });
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load settings');
@@ -108,7 +120,15 @@ const Settings = () => {
 
     try {
       const response = await settingsApi.update(editedSettings);
-      setSettings(response.data);
+      setSettings({
+        ...response.data,
+        defaultPlatformFee: response.data.defaultPlatformFee || 0,
+        notificationEmail: response.data.notificationEmail || '',
+        autoGenerateInvoices: response.data.autoGenerateInvoices || false,
+        platformOptions: response.data.platformOptions || [],
+        paymentOptions: response.data.paymentOptions || [],
+        logoUrl: response.data.logoUrl || editedSettings.logoUrl || ''
+      });
       setIsEditing(false);
       setEditedSettings(null);
       setSuccess(true);
@@ -116,6 +136,37 @@ const Settings = () => {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings');
     }
+  };
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!editedSettings || !e.target.files || !e.target.files[0]) return;
+
+    const file = e.target.files[0];
+
+    try {
+      const response = await settingsApi.uploadLogo(file);
+      const newSettings = {
+        ...editedSettings,
+        logoUrl: response.data.logoUrl
+      };
+      setEditedSettings(newSettings);
+      
+      // Also update the main settings to show the logo immediately
+      setSettings(prev => ({
+        ...prev,
+        logoUrl: response.data.logoUrl
+      }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to upload logo');
+    }
+  };
+
+  const handleRemoveLogo = () => {
+    if (!editedSettings) return;
+    setEditedSettings(prev => ({
+      ...prev!,
+      logoUrl: ''
+    }));
   };
 
   if (loading) {
@@ -201,6 +252,53 @@ const Settings = () => {
           <div className="px-4 py-5 sm:p-6">
             <h3 className="text-lg font-medium leading-6 text-gray-900">Business Information</h3>
             <div className="mt-6 grid grid-cols-1 gap-y-6 gap-x-4 sm:grid-cols-6">
+              <div className="sm:col-span-6">
+                <label className="block text-sm font-medium text-gray-700">Company Logo</label>
+                <div className="mt-1 flex items-center space-x-4">
+                  <div className="w-32 h-32 bg-gray-100 rounded-lg overflow-hidden flex items-center justify-center">
+                    {(isEditing ? editedSettings?.logoUrl : settings.logoUrl) ? (
+                      <img
+                        src={isEditing ? editedSettings?.logoUrl : settings.logoUrl}
+                        alt="Company Logo"
+                        className="max-w-full max-h-full object-contain"
+                      />
+                    ) : (
+                      <PhotoIcon className="h-12 w-12 text-gray-300" />
+                    )}
+                  </div>
+                  {isEditing && (
+                    <div className="flex flex-col space-y-2">
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        onChange={handleLogoUpload}
+                        accept="image/*"
+                        className="hidden"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                      >
+                        Upload Logo
+                      </button>
+                      {(isEditing ? editedSettings?.logoUrl : settings.logoUrl) && (
+                        <button
+                          type="button"
+                          onClick={handleRemoveLogo}
+                          className="inline-flex items-center px-4 py-2 border border-red-300 shadow-sm text-sm font-medium rounded-md text-red-700 bg-white hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                        >
+                          Remove Logo
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <p className="mt-2 text-sm text-gray-500">
+                  Recommended size: 400x400 pixels. Maximum file size: 2MB.
+                </p>
+              </div>
+
               <div className="sm:col-span-3">
                 <label htmlFor="companyName" className="block text-sm font-medium text-gray-700">
                   Company Name

@@ -7,6 +7,7 @@ import clientRoutes from './routes/clientRoutes';
 import quoteRoutes from './routes/quoteRoutes';
 import salesRoutes from './routes/salesRoutes';
 import settingsRoutes from './routes/settingsRoutes';
+import trackingRoutes from './routes/trackingRoutes';
 
 // Load environment variables
 dotenv.config();
@@ -25,6 +26,7 @@ app.use('/api/clients', clientRoutes);
 app.use('/api/quotes', quoteRoutes);
 app.use('/api/sales', salesRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/tracking', trackingRoutes);
 
 // Error handling middleware
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {

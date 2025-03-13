@@ -1,10 +1,12 @@
 import { useState, useEffect, Fragment } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeftIcon, UserCircleIcon, PhoneIcon, EnvelopeIcon, BuildingOfficeIcon, PlusIcon, ChevronDownIcon, PencilIcon, XMarkIcon } from '@heroicons/react/24/outline';
+import { ArrowLeftIcon, UserCircleIcon, PhoneIcon, EnvelopeIcon, BuildingOfficeIcon, PlusIcon, ChevronDownIcon, PencilIcon, XMarkIcon, DocumentTextIcon, ChartBarIcon, TruckIcon } from '@heroicons/react/24/outline';
 import { clientApi, quoteApi, settingsApi } from '../services/api';
 import { Dialog, Transition } from '@headlessui/react';
 import FormModal from '../components/FormModal';
 import ConfirmationModal from '../components/ConfirmationModal';
+import ReportModal from '../components/ReportModal';
+import ClientReport from '../components/ClientReport';
 import { 
   SelectField, 
   InputField, 
@@ -13,7 +15,7 @@ import {
   StatusGroup 
 } from '../components/FormFields';
 
-interface Client {
+interface ClientResponse {
   id: number;
   name: string;
   email: string;
@@ -27,12 +29,19 @@ interface Client {
   zipCode: string;
   country: string;
   taxId: string;
+  quotes?: Quote[];
+  trackings?: Tracking[];
+}
+
+interface Client extends ClientResponse {
+  quotes: Quote[];
+  trackings: Tracking[];
 }
 
 interface Quote {
   id: number;
   clientId: number;
-  client: Client;
+  client: Omit<ClientResponse, 'quotes' | 'trackings'>;
   product: string;
   platform: string;
   status: 'quote' | 'quoted' | 'purchase' | 'purchased' | 'received' | 'paid';
@@ -41,6 +50,19 @@ interface Quote {
   amountPaid: number;
   paymentMethod: string;
   notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface Tracking {
+  id: string;
+  trackingNumber: string;
+  quotes: Quote[];
+  clientId: string;
+  status: string;
+  declaredValue: number;
+  shippingCost: number;
+  totalValue: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -88,6 +110,14 @@ const ClientDetail = () => {
   const [platformOptions, setPlatformOptions] = useState<string[]>([]);
   const [paymentOptions, setPaymentOptions] = useState<string[]>([]);
   const [loadingSettings, setLoadingSettings] = useState(true);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportData, setReportData] = useState<{
+    startDate: string;
+    endDate: string;
+    quotes: Quote[];
+    shipments: Tracking[];
+    selectedStatuses: string[];
+  } | null>(null);
 
   // Status options for the dropdown
   const statusOptions = [
@@ -113,7 +143,15 @@ const ClientDetail = () => {
           settingsApi.get()
         ]);
         
-        setClient(clientResponse.data);
+        // Set client with quotes and trackings
+        const clientResponseData = clientResponse.data as ClientResponse;
+        const clientData: Client = {
+          ...clientResponseData,
+          quotes: clientResponseData.quotes || [],
+          trackings: clientResponseData.trackings || []
+        };
+        setClient(clientData);
+        
         // Filter quotes for this client
         setClientQuotes(quotesResponse.data.filter(quote => quote.clientId === parseInt(clientId)));
         setPlatformOptions(settingsResponse.data.platformOptions);
@@ -247,6 +285,71 @@ const ClientDetail = () => {
     }
   };
 
+  // Add new function to handle invoice export
+  const handleExportInvoice = (quote: Quote) => {
+    // Open in new window/tab
+    const win = window.open('/sample-invoice', '_blank');
+    if (win) {
+      // Pass data through sessionStorage
+      sessionStorage.setItem('invoiceData', JSON.stringify({
+        quote,
+        client,
+        invoiceNumber: `INV-${new Date().getFullYear()}-${quote.id.toString().padStart(3, '0')}`,
+        invoiceDate: new Date(),
+        dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
+      }));
+      win.focus();
+    }
+  };
+
+  const handleGenerateReport = async (startDateStr: string, endDateStr: string, selectedStatuses: string[]) => {
+    if (!client) return;
+
+    const startDate = new Date(startDateStr);
+    const endDate = new Date(endDateStr);
+
+    // Filter quotes based on date range and selected statuses
+    const filteredQuotes = client.quotes?.filter(quote => {
+      const quoteDate = new Date(quote.createdAt);
+      return (
+        quoteDate >= startDate &&
+        quoteDate <= endDate &&
+        selectedStatuses.includes(quote.status)
+      );
+    }) || [];
+
+    // Filter shipments based on date range if 'shipment' status is selected
+    const filteredShipments = selectedStatuses.includes('shipment')
+      ? (client.trackings?.filter(shipment => {
+          const shipmentDate = new Date(shipment.createdAt);
+          return shipmentDate >= startDate && shipmentDate <= endDate;
+        }) || [])
+      : [];
+
+    // Generate unique timestamp for report
+    const timestamp = Date.now();
+
+    // Store report data in sessionStorage
+    const reportData = {
+      client,
+      quotes: filteredQuotes,
+      shipments: filteredShipments,
+      startDate: startDateStr,
+      endDate: endDateStr,
+      selectedStatuses,
+      timestamp
+    };
+
+    try {
+      sessionStorage.setItem(`reportData_${timestamp}`, JSON.stringify(reportData));
+      window.open(`/client-report?t=${timestamp}`, '_blank');
+      setShowReportModal(false);
+    } catch (error) {
+      console.error('Failed to store report data:', error);
+      // Handle error (e.g., show error message to user)
+    }
+  };
+
   // Form content for add/edit quote modal
   const renderFormContent = (isEdit: boolean) => {
     const form = isEdit ? editQuoteForm : newQuoteForm;
@@ -312,7 +415,7 @@ const ClientDetail = () => {
             id="cost"
             name="cost"
             label="Cost"
-            value={form.cost}
+            value={form.cost?.toString() || ''}
             onChange={(value) => handleChange('cost', Number(value))}
           />
 
@@ -320,13 +423,15 @@ const ClientDetail = () => {
             id="chargedAmount"
             name="chargedAmount"
             label="Charged Amount"
-            value={form.chargedAmount}
+            value={form.chargedAmount?.toString() || ''}
             onChange={(value) => handleChange('chargedAmount', Number(value))}
             onPercentageSelect={(percentage: number) => {
-              const cost = form.cost;
-              const calculatedAmount = (cost * (1 + percentage / 100));
-              handleChange('chargedAmount', calculatedAmount);
+              const cost = form.cost || 0;
+              const calculatedAmount = Number((cost * (1 + percentage / 100)).toFixed(2));
+              handleChange('chargedAmount', calculatedAmount.toString());
             }}
+            selectedPercentage={null}
+            cost={form.cost}
           />
         </div>
 
@@ -484,14 +589,24 @@ const ClientDetail = () => {
               <h2 className="text-xl font-semibold text-gray-900">Client Quotes</h2>
               <p className="mt-1 text-sm text-gray-600">Manage and track all quotes for this client.</p>
             </div>
-            <button
-              type="button"
-              onClick={addNewQuoteRow}
-              className="inline-flex items-center rounded-xl border border-transparent bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-            >
-              <PlusIcon className="-ml-1 mr-2 h-5 w-5" aria-hidden="true" />
-              Add Quote
-            </button>
+            <div className="flex space-x-4">
+              <button
+                type="button"
+                onClick={() => setShowReportModal(true)}
+                className="inline-flex items-center rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+              >
+                <ChartBarIcon className="-ml-1 mr-2 h-5 w-5 text-gray-400" aria-hidden="true" />
+                Report
+              </button>
+              <button
+                type="button"
+                onClick={addNewQuoteRow}
+                className="inline-flex items-center rounded-xl border border-transparent bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              >
+                <PlusIcon className="-ml-1 mr-2 h-5 w-5" aria-hidden="true" />
+                Add Quote
+              </button>
+            </div>
           </div>
         </div>
         
@@ -595,16 +710,29 @@ const ClientDetail = () => {
                       {quote.paymentMethod}
                     </td>
                     <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleEditQuote(quote);
-                        }}
-                        className="text-indigo-600 hover:text-indigo-900"
-                      >
-                        <PencilIcon className="h-5 w-5" aria-hidden="true" />
-                      </button>
+                      <div className="flex justify-end space-x-2">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleExportInvoice(quote);
+                          }}
+                          className="text-blue-600 hover:text-blue-900"
+                          title="Export Invoice"
+                        >
+                          <DocumentTextIcon className="h-5 w-5" aria-hidden="true" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleEditQuote(quote);
+                          }}
+                          className="text-indigo-600 hover:text-indigo-900"
+                        >
+                          <PencilIcon className="h-5 w-5" aria-hidden="true" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -612,6 +740,97 @@ const ClientDetail = () => {
                 <tr>
                   <td colSpan={8} className="px-6 py-4 text-center text-sm text-gray-500">
                     No quotes found for this client. Add one to get started.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Client shipments section */}
+      <div className="mt-8 bg-white shadow-lg rounded-2xl overflow-hidden">
+        <div className="px-6 py-5 border-b border-gray-200">
+          <div className="flex justify-between items-center">
+            <div>
+              <h2 className="text-xl font-semibold text-gray-900">Client Shipments</h2>
+              <p className="mt-1 text-sm text-gray-600">View all shipments for this client.</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-300">
+            <thead className="bg-gray-50">
+              <tr>
+                <th scope="col" className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-6">
+                  Date
+                </th>
+                <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
+                  Shipment Number
+                </th>
+                <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
+                  Status
+                </th>
+                <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
+                  Items Shipped
+                </th>
+                <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
+                  Total
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200 bg-white">
+              {client?.trackings && client.trackings.length > 0 ? (
+                client.trackings.map((tracking) => (
+                  <tr key={tracking.id.toString()}>
+                    <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm sm:pl-6">
+                      <div className="font-medium text-gray-900">
+                        {new Date(tracking.createdAt).toLocaleDateString()}
+                      </div>
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
+                      {tracking.trackingNumber}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-4 text-sm">
+                      <span className={`inline-flex rounded-full px-2 text-xs font-semibold leading-5 ${
+                        tracking.status === 'delivered'
+                          ? 'bg-green-100 text-green-800'
+                          : tracking.status === 'in_transit'
+                          ? 'bg-blue-100 text-blue-800'
+                          : 'bg-yellow-100 text-yellow-800'
+                      }`}>
+                        {tracking.status === 'delivered'
+                          ? 'Delivered'
+                          : tracking.status === 'in_transit'
+                          ? 'In Transit'
+                          : tracking.status === 'paid'
+                          ? 'Paid'
+                          : 'Pending'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-4 text-sm text-gray-500">
+                      <div className="max-w-md truncate">
+                        {tracking.quotes.map(q => q.product).join(', ')}
+                      </div>
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
+                      ${tracking.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={5}>
+                    <div className="flex flex-col items-center justify-center py-12">
+                      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-600 shadow-lg shadow-emerald-200">
+                        <TruckIcon className="h-6 w-6 text-white" aria-hidden="true" />
+                      </div>
+                      <h3 className="mt-4 text-lg font-medium text-gray-900">No Shipments Found</h3>
+                      <p className="mt-2 text-sm text-gray-500 text-center">
+                        This client has no shipments yet.
+                      </p>
+                    </div>
                   </td>
                 </tr>
               )}
@@ -655,6 +874,30 @@ const ClientDetail = () => {
       >
         {renderFormContent(true)}
       </FormModal>
+
+      {/* Report Modal */}
+      {showReportModal && (
+        <ReportModal
+          isOpen={showReportModal}
+          onClose={() => setShowReportModal(false)}
+          onGenerate={handleGenerateReport}
+          title={`Generate Report for ${client?.company || 'Client'}`}
+        />
+      )}
+
+      {/* Report Display */}
+      {reportData && (
+        <div className="mt-8">
+          <ClientReport
+            client={client!}
+            quotes={reportData.quotes}
+            shipments={reportData.shipments}
+            startDate={reportData.startDate}
+            endDate={reportData.endDate}
+            selectedStatuses={reportData.selectedStatuses}
+          />
+        </div>
+      )}
     </div>
   );
 };

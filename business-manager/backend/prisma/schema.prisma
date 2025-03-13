@@ -28,6 +28,8 @@ model Quote {
   paymentMethod String?
   notes         String?
   activities    Activity[]
+  tracking      Tracking?  @relation(fields: [trackingId], references: [id])
+  trackingId    Int?
 }
 
 model Client {
@@ -47,6 +49,7 @@ model Client {
   country   String?
   taxId     String?
   quotes    Quote[]
+  trackings Tracking[]
 }
 
 model Activity {
@@ -72,6 +75,22 @@ model Settings {
   autoGenerateInvoices Boolean
   platformOptions     String[]
   paymentOptions      String[]
+  logoUrl             String?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
+}
+
+model Tracking {
+  id             Int      @id @default(autoincrement())
+  trackingNumber String   @unique
+  quotes         Quote[]
+  client         Client   @relation(fields: [clientId], references: [id])
+  clientId       Int
+  status         String   @default("pending")
+  declaredValue  Float
+  shippingCost   Float
+  totalValue     Float
+  amountPaid     Float    @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }

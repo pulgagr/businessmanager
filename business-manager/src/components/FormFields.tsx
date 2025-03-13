@@ -40,6 +40,7 @@ interface CurrencyFieldProps extends Omit<InputFieldProps, 'type'> {
   currency?: string;
   onPercentageSelect?: (percentage: number) => void;
   selectedPercentage?: number | null;
+  cost?: number;
 }
 
 interface StatusGroupProps extends Omit<FormFieldProps, 'label'> {
@@ -128,49 +129,71 @@ export const CurrencyField: React.FC<CurrencyFieldProps> = ({
   className = '',
   onPercentageSelect,
   selectedPercentage,
+  cost,
   ...props
-}) => (
-  <div className={className}>
-    <label htmlFor={props.id} className="block text-base font-medium text-gray-900 mb-2">
-      {label} {required && <span className="text-red-500">*</span>}
-    </label>
-    <div className="relative">
-      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-        <span className="text-gray-500 sm:text-sm">$</span>
+}) => {
+  const calculateActualPercentage = () => {
+    if (!cost || !props.value || cost === 0) return null;
+    const currentValue = typeof props.value === 'string' ? parseFloat(props.value) : props.value;
+    if (isNaN(currentValue)) return null;
+    
+    const percentage = ((currentValue / cost - 1) * 100).toFixed(0);
+    return parseInt(percentage);
+  };
+
+  const actualPercentage = calculateActualPercentage();
+  const availablePercentages = [10, 20, 30, 35, 40];
+  
+  const displayPercentages = [...availablePercentages];
+  if (actualPercentage !== null && !availablePercentages.includes(actualPercentage)) {
+    displayPercentages[displayPercentages.length - 1] = actualPercentage;
+  }
+
+  return (
+    <div className={className}>
+      <label htmlFor={props.id} className="block text-base font-medium text-gray-900 mb-2">
+        {label} {required && <span className="text-red-500">*</span>}
+      </label>
+      <div className="relative">
+        <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+          <span className="text-gray-500 sm:text-sm">$</span>
+        </div>
+        <input
+          {...props}
+          type="text"
+          inputMode="decimal"
+          className="block w-full rounded-xl border border-gray-300 bg-white py-3 pl-7 pr-12 text-gray-900 shadow-sm hover:border-gray-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none transition-colors duration-200"
+        />
+        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+          <span className="text-gray-500 sm:text-sm">{currency}</span>
+        </div>
       </div>
-      <input
-        {...props}
-        type="text"
-        inputMode="decimal"
-        className="block w-full rounded-xl border border-gray-300 bg-white py-3 pl-7 pr-12 text-gray-900 shadow-sm hover:border-gray-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none transition-colors duration-200"
-      />
-      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
-        <span className="text-gray-500 sm:text-sm">{currency}</span>
-      </div>
+      {onPercentageSelect && (
+        <div className="mt-3">
+          <div className="bg-gray-100 rounded-xl p-1 flex">
+            {displayPercentages.map((percentage) => (
+              <button
+                key={percentage}
+                type="button"
+                onClick={() => onPercentageSelect(percentage)}
+                className={`
+                  flex-1 py-2 px-3 text-sm font-medium rounded-lg whitespace-nowrap
+                  ${(selectedPercentage === percentage || actualPercentage === percentage)
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-900'
+                  }
+                `}
+              >
+                {percentage}%
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
     </div>
-    {onPercentageSelect && (
-      <div className="mt-3 flex justify-start items-center space-x-2">
-        {[10, 20, 30, 35, 40].map((percentage) => (
-          <button
-            key={percentage}
-            type="button"
-            onClick={() => onPercentageSelect(percentage)}
-            className={`
-              rounded-full min-w-[60px] py-2 text-sm font-medium text-center
-              ${selectedPercentage === percentage
-                ? 'bg-gray-900 text-white'
-                : 'bg-white text-gray-900 border border-gray-200 hover:border-gray-300'
-              }
-            `}
-          >
-            {percentage}%
-          </button>
-        ))}
-      </div>
-    )}
-    {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
-  </div>
-);
+  );
+};
 
 export const StatusGroup: React.FC<StatusGroupProps> = ({
   value,
@@ -179,7 +202,7 @@ export const StatusGroup: React.FC<StatusGroupProps> = ({
   className = '',
 }) => (
   <div className={`${className} space-y-2`}>
-    <div className="bg-gray-50 rounded-xl p-1 flex">
+    <div className="bg-gray-100 rounded-xl p-1 flex">
       {options.map((option) => (
         <button
           key={option.value}

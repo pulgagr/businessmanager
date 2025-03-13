@@ -18,7 +18,8 @@ export const getSettings = async (req: Request, res: Response) => {
           notificationEmail: '',
           autoGenerateInvoices: false,
           platformOptions: [],
-          paymentOptions: []
+          paymentOptions: [],
+          logoUrl: null
         }
       });
       res.json(defaultSettings);
@@ -44,8 +45,14 @@ export const updateSettings = async (req: Request, res: Response) => {
       notificationEmail,
       autoGenerateInvoices,
       platformOptions,
-      paymentOptions
+      paymentOptions,
+      logoUrl
     } = req.body;
+
+    // Validate required fields
+    if (!companyName || !email) {
+      return res.status(400).json({ message: 'Company name and email are required' });
+    }
 
     const settings = await prisma.settings.findFirst();
     
@@ -62,7 +69,8 @@ export const updateSettings = async (req: Request, res: Response) => {
           notificationEmail,
           autoGenerateInvoices,
           platformOptions,
-          paymentOptions
+          paymentOptions,
+          logoUrl
         }
       });
       res.json(newSettings);
@@ -80,7 +88,8 @@ export const updateSettings = async (req: Request, res: Response) => {
           notificationEmail,
           autoGenerateInvoices,
           platformOptions,
-          paymentOptions
+          paymentOptions,
+          logoUrl
         }
       });
       res.json(updatedSettings);

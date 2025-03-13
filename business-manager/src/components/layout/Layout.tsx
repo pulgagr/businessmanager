@@ -10,6 +10,7 @@ import {
   XMarkIcon,
   Cog6ToothIcon,
   CurrencyDollarIcon,
+  TruckIcon,
   ChevronRightIcon
 } from '@heroicons/react/24/outline';
 import { settingsApi } from '../../services/api';
@@ -53,6 +54,7 @@ const Layout = ({ children }: LayoutProps) => {
         { name: 'Missing Quotes', href: '/missing-quotes', icon: ExclamationCircleIcon },
         { name: 'Monthly Sales', href: '/monthly-sales', icon: ChartBarIcon },
         { name: 'Unpaid Orders', href: '/unpaid-orders', icon: CurrencyDollarIcon },
+        { name: 'Shipments', href: '/tracking', icon: TruckIcon },
       ]
     },
     {

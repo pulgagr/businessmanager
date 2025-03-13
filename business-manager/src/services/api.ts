@@ -53,11 +53,12 @@ export interface Settings {
   address: string;
   taxRate: number;
   currency: string;
+  platformOptions: string[];
+  paymentOptions: string[];
+  logoUrl?: string;
   defaultPlatformFee: number;
   notificationEmail: string;
   autoGenerateInvoices: boolean;
-  platformOptions: string[];
-  paymentOptions: string[];
 }
 
 export interface MonthlySummary {
@@ -69,6 +70,28 @@ export interface MonthlySummary {
     status: string;
     _count: { id: number };
   }>;
+}
+
+export interface Tracking {
+  id: string;
+  trackingNumber: string;
+  status: string;
+  shippingCost: number;
+  totalValue: number;
+  declaredValue: number;
+  amountPaid: number;
+  createdAt: string;
+  updatedAt: string;
+  clientId: string;
+}
+
+export interface CreateTrackingData {
+  trackingNumber: string;
+  quoteIds: number[];
+  clientId: number;
+  status?: 'pending' | 'in_transit' | 'delivered';
+  declaredValue: number;
+  shippingCost: number;
 }
 
 const api = axios.create({
@@ -124,6 +147,69 @@ export const salesApi = {
 export const settingsApi = {
   get: () => api.get<Settings>('/settings'),
   update: (data: Partial<Settings>) => api.put<Settings>('/settings', data),
+  uploadLogo: async (file: File) => {
+    return new Promise<{ data: { logoUrl: string } }>((resolve, reject) => {
+      // Check file size (max 500KB)
+      if (file.size > 500 * 1024) {
+        reject(new Error('File size too large. Maximum size is 500KB'));
+        return;
+      }
+
+      // Check file type
+      if (!file.type.match(/^image\/(jpeg|png|gif)$/)) {
+        reject(new Error('Invalid file type. Only JPEG, PNG, and GIF are allowed'));
+        return;
+      }
+
+      const img = new Image();
+      const reader = new FileReader();
+
+      reader.onload = () => {
+        img.src = reader.result as string;
+        img.onload = () => {
+          // Create canvas for resizing
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+
+          // Calculate new dimensions (max 400x400)
+          if (width > height) {
+            if (width > 400) {
+              height = Math.round((height * 400) / width);
+              width = 400;
+            }
+          } else {
+            if (height > 400) {
+              width = Math.round((width * 400) / height);
+              height = 400;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+
+          // Draw resized image
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            reject(new Error('Failed to process image'));
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+
+          // Convert to base64 with reduced quality
+          const base64String = canvas.toDataURL('image/jpeg', 0.8);
+          resolve({ data: { logoUrl: base64String } });
+        };
+        img.onerror = () => {
+          reject(new Error('Failed to load image'));
+        };
+      };
+      reader.onerror = () => {
+        reject(new Error('Failed to read file'));
+      };
+      reader.readAsDataURL(file);
+    });
+  },
 };
 
 // Dashboard API
@@ -152,6 +238,19 @@ export const dashboardApi = {
     completedQuotes: number[];
   }>('/dashboard/quotes-comparison'),
   getRecentActivity: () => api.get<Activity[]>('/dashboard/recent-activity'),
+};
+
+// Tracking API
+export const trackingApi = {
+  getAll: () => api.get<Tracking[]>('/tracking'),
+  getById: (id: number) => api.get<Tracking>(`/tracking/${id}`),
+  create: (data: CreateTrackingData) => api.post<Tracking>('/tracking', data),
+  update: (id: number, data: Partial<CreateTrackingData>) => api.put<Tracking>(`/tracking/${id}`, data),
+  updateStatus: (id: number, status: 'pending' | 'in_transit' | 'delivered' | 'paid') => 
+    api.patch<Tracking>(`/tracking/${id}/status`, { status }),
+  updatePayment: (id: number, amountPaid: number, status?: string) => 
+    api.patch<Tracking>(`/tracking/${id}/payment`, { amountPaid, status }),
+  delete: (id: number) => api.delete(`/tracking/${id}`),
 };
 
 export default api; 

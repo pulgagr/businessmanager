@@ -1,6 +1,6 @@
 import { useState, useEffect, Fragment } from 'react';
 import { format } from 'date-fns';
-import { salesApi, Quote } from '../services/api';
+import { salesApi, Quote, trackingApi, Tracking } from '../services/api';
 import { Dialog, Transition } from '@headlessui/react';
 import {
   ArrowUpIcon,
@@ -20,12 +20,14 @@ interface ExtendedQuote extends Quote {
   paymentMethod: string;
 }
 
-interface UnpaidOrder extends Omit<ExtendedQuote, 'chargedAmount'> {
+interface UnpaidItem extends Omit<ExtendedQuote, 'chargedAmount'> {
   orderNumber: string;
   charged: number;
   daysOverdue: number;
   amountPaid: number;
   remainingAmount: number;
+  itemType: 'order' | 'shipment';
+  originalId: number;
 }
 
 interface Metrics {
@@ -42,12 +44,12 @@ interface Metrics {
 }
 
 const UnpaidOrders = () => {
-  const [orders, setOrders] = useState<UnpaidOrder[]>([]);
+  const [orders, setOrders] = useState<UnpaidItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<'daysOverdue' | 'charged'>('daysOverdue');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-  const [selectedOrder, setSelectedOrder] = useState<UnpaidOrder | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<UnpaidItem | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingStatus, setEditingStatus] = useState<Quote['status']>('received');
   const [updateSuccess, setUpdateSuccess] = useState(false);
@@ -73,9 +75,16 @@ const UnpaidOrders = () => {
   const fetchUnpaidOrders = async () => {
     try {
       setLoading(true);
-      const response = await salesApi.getMonthlySales();
-      const unpaidOrders = response.data
-        .filter(order => order.status !== 'paid')
+      
+      // Fetch both quotes and shipments
+      const [salesResponse, trackingsResponse] = await Promise.all([
+        salesApi.getMonthlySales(),
+        trackingApi.getAll()
+      ]);
+      
+      // Process quotes
+      const unpaidQuotes = salesResponse.data
+        .filter(order => order.status !== 'paid' && (order.status as string) !== 'shipment')
         .map(order => ({
           ...order,
           orderNumber: order.id.toString(),
@@ -84,12 +93,68 @@ const UnpaidOrders = () => {
           charged: order.chargedAmount,
           daysOverdue: calculateDaysOverdue(order.createdAt),
           amountPaid: order.amountPaid || 0,
-          remainingAmount: order.chargedAmount - (order.amountPaid || 0)
+          remainingAmount: order.chargedAmount - (order.amountPaid || 0),
+          itemType: 'order' as const,
+          originalId: order.id
         }));
-
-      const sortedOrders = sortOrders(unpaidOrders);
-      setOrders(sortedOrders);
-      calculateMetrics(sortedOrders);
+      
+      // Process shipments - extract from nested response structure
+      let unpaidShipments: UnpaidItem[] = [];
+      if (trackingsResponse && trackingsResponse.data) {
+        // Handle the response structure
+        const trackingsData = trackingsResponse.data as any; // Using any to bypass type checking for complex structure
+        const trackings = Array.isArray(trackingsData) ? 
+          trackingsData : 
+          trackingsData.data;
+          
+        if (trackings) {
+          unpaidShipments = trackings
+            .filter((tracking: Tracking) => tracking.status !== 'paid')
+            .map((tracking: Tracking) => {
+              // Create a mock client object since client info may be in a different format
+              const clientCompany = typeof tracking.clientId === 'object' && tracking.clientId && 'company' in tracking.clientId
+                ? (tracking.clientId as any).company
+                : 'Unknown Company';
+                
+              const clientName = typeof tracking.clientId === 'object' && tracking.clientId && 'name' in tracking.clientId
+                ? (tracking.clientId as any).name
+                : 'Unknown Client';
+                
+              const client = {
+                company: clientCompany,
+                name: clientName
+              };
+              
+              return {
+                ...tracking,
+                id: tracking.id,
+                originalId: parseInt(tracking.id),
+                itemType: 'shipment' as const,
+                client,
+                product: tracking.trackingNumber,
+                platform: 'Shipment',
+                status: 'shipment',
+                cost: tracking.shippingCost,
+                chargedAmount: tracking.totalValue,
+                charged: tracking.totalValue,
+                orderNumber: `S-${tracking.id}`,
+                paymentMethod: 'Shipping',
+                notes: `Tracking: ${tracking.trackingNumber}`,
+                daysOverdue: calculateDaysOverdue(tracking.createdAt),
+                amountPaid: tracking.amountPaid || 0,
+                remainingAmount: tracking.totalValue - (tracking.amountPaid || 0),
+                createdAt: tracking.createdAt,
+                updatedAt: tracking.updatedAt
+              };
+            });
+        }
+      }
+      
+      // Combine quotes and shipments
+      const allUnpaidItems = [...unpaidQuotes, ...unpaidShipments];
+      const sortedItems = sortOrders(allUnpaidItems);
+      setOrders(sortedItems);
+      calculateMetrics(sortedItems);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load unpaid orders');
@@ -98,7 +163,7 @@ const UnpaidOrders = () => {
     }
   };
 
-  const calculateMetrics = (orders: UnpaidOrder[]) => {
+  const calculateMetrics = (orders: UnpaidItem[]) => {
     const totalUnpaid = orders.reduce((sum, order) => sum + order.remainingAmount, 0);
     const overdue30Days = orders.filter(order => order.daysOverdue > 30).length;
     const averageDaysOverdue = orders.reduce((sum, order) => sum + order.daysOverdue, 0) / orders.length || 0;
@@ -138,7 +203,7 @@ const UnpaidOrders = () => {
     return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
   };
 
-  const sortOrders = (ordersToSort: UnpaidOrder[]) => {
+  const sortOrders = (ordersToSort: UnpaidItem[]) => {
     return [...ordersToSort].sort((a, b) => {
       const multiplier = sortOrder === 'asc' ? 1 : -1;
       if (sortBy === 'daysOverdue') {
@@ -171,13 +236,27 @@ const UnpaidOrders = () => {
     try {
       if (!selectedOrder) return;
 
-      const updatedOrder = {
-        ...selectedOrder,
-        status: editingStatus,
-        amountPaid: editingAmount
-      };
+      // Handle differently based on item type
+      if (selectedOrder.itemType === 'order') {
+        // Handle quote/order payment
+        const updatedOrder = {
+          ...selectedOrder,
+          status: editingStatus,
+          amountPaid: editingAmount
+        };
 
-      await salesApi.updateOrder(selectedOrder.id, updatedOrder);
+        await salesApi.updateOrder(selectedOrder.originalId, updatedOrder);
+      } else {
+        // Handle shipment payment
+        if (editingStatus === 'paid' || editingAmount >= selectedOrder.charged) {
+          // Mark shipment as fully paid
+          await trackingApi.updatePayment(selectedOrder.originalId, editingAmount, 'paid');
+        } else {
+          // Add partial payment
+          await trackingApi.updatePayment(selectedOrder.originalId, editingAmount);
+        }
+      }
+      
       await fetchUnpaidOrders(); // Refresh the orders list
       
       setShowSaveConfirmation(false);
@@ -193,13 +272,14 @@ const UnpaidOrders = () => {
         setUpdateSuccess(false);
       }, 3000);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update order');
+      setError(err instanceof Error ? err.message : 'Failed to update payment');
     }
   };
 
-  const handleRowClick = (order: UnpaidOrder) => {
+  const handleRowClick = (order: UnpaidItem) => {
     setSelectedOrder(order);
     setEditingStatus(order.status);
+    setEditingAmount(0); // Start with 0 for new payment
     setIsEditModalOpen(true);
   };
 
@@ -243,7 +323,7 @@ const UnpaidOrders = () => {
             <p className="ml-16 truncate text-sm font-medium text-gray-600">Total Unpaid</p>
           </dt>
           <dd className="ml-16 flex items-baseline pt-1">
-            <p className="text-2xl font-semibold text-gray-900">{metrics.totalUnpaid}</p>
+            <p className="text-2xl font-semibold text-gray-900">{formatCurrency(metrics.totalUnpaid)}</p>
           </dd>
         </div>
 
@@ -328,16 +408,13 @@ const UnpaidOrders = () => {
                         Product
                       </th>
                       <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
-                        Platform
+                        Type
                       </th>
                       <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
                         Amount Due
                       </th>
                       <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
                         Days Overdue
-                      </th>
-                      <th scope="col" className="relative py-3.5 pl-3 pr-4 sm:pr-6">
-                        <span className="sr-only">Actions</span>
                       </th>
                     </tr>
                   </thead>
@@ -355,13 +432,19 @@ const UnpaidOrders = () => {
                         } transition-colors duration-150 cursor-pointer`}
                       >
                         <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">
-                          {typeof order.client === 'string' ? order.client : order.client.name}
+                          {typeof order.client === 'string' ? order.client : order.client.company}
                         </td>
                         <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
                           {order.product}
                         </td>
-                        <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                          {order.platform}
+                        <td className="whitespace-nowrap px-3 py-4 text-sm">
+                          <span className={`inline-flex rounded-full px-2 text-xs font-semibold leading-5 ${
+                            (order.status as string) === 'shipment' 
+                              ? 'bg-blue-100 text-blue-800' 
+                              : 'bg-purple-100 text-purple-800'
+                          }`}>
+                            {(order.status as string) === 'shipment' ? 'Shipment' : 'Order'}
+                          </span>
                         </td>
                         <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
                           {formatCurrency(order.charged)}
@@ -374,11 +457,6 @@ const UnpaidOrders = () => {
                             : 'text-gray-500'
                         }`}>
                           {order.daysOverdue} days
-                        </td>
-                        <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-sm font-medium sm:pr-6">
-                          <a href="#" className="text-indigo-600 hover:text-indigo-900">
-                            Edit
-                          </a>
                         </td>
                       </tr>
                     ))}
@@ -444,7 +522,7 @@ const UnpaidOrders = () => {
                               Order #{selectedOrder?.orderNumber} - {selectedOrder?.product}
                             </p>
                             <p className="mt-1 text-sm text-gray-500">
-                              Client: {typeof selectedOrder?.client === 'string' ? selectedOrder?.client : selectedOrder?.client.name}
+                              Client: {typeof selectedOrder?.client === 'string' ? selectedOrder?.client : selectedOrder?.client.company}
                             </p>
                             <div className="mt-4 bg-gray-50 p-4 rounded-lg">
                               <div className="grid grid-cols-2 gap-4">

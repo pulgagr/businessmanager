@@ -332,7 +332,7 @@ const Quotes = () => {
             onChange={handleChange}
             options={clients.map(client => ({
               value: client.id,
-              label: client.name
+              label: client.company
             }))}
             placeholder="Select a client"
             required
@@ -424,6 +424,7 @@ const Quotes = () => {
               }
             }}
             selectedPercentage={selectedPercentage}
+            cost={isEditing ? editingQuote?.cost : newQuote.cost}
           />
         </div>
 
@@ -434,6 +435,7 @@ const Quotes = () => {
           value={currentQuote?.notes || ''}
           onChange={handleChange}
           placeholder="Leave any notes here (optional)..."
+          rows={2}
         />
       </div>
     );
@@ -566,16 +568,17 @@ const Quotes = () => {
                       <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
                         Date
                       </th>
-                      <th scope="col" className="relative py-3.5 pl-3 pr-4 sm:pr-6">
-                        <span className="sr-only">Actions</span>
-                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 bg-white">
                     {filteredQuotes.map((quote) => (
-                      <tr key={quote.id}>
+                      <tr 
+                        key={quote.id}
+                        onClick={() => setEditingQuote(quote)}
+                        className="cursor-pointer hover:bg-gray-50"
+                      >
                         <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">
-                          {quote.client.name}
+                          {quote.client.company}
                         </td>
                         <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
                           {quote.product}
@@ -598,24 +601,6 @@ const Quotes = () => {
                         </td>
                         <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
                           {format(new Date(quote.createdAt), 'MMM d, yyyy')}
-                        </td>
-                        <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
-                          <div className="flex justify-end space-x-2">
-                            <button
-                              onClick={() => setEditingQuote(quote)}
-                              className="inline-flex items-center rounded-md bg-white px-2.5 py-1.5 text-sm font-medium text-indigo-700 hover:bg-indigo-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-                            >
-                              <PencilIcon className="h-4 w-4 mr-1" aria-hidden="true" />
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => setDeletingQuote(quote)}
-                              className="inline-flex items-center rounded-md bg-white px-2.5 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
-                            >
-                              <TrashIcon className="h-4 w-4 mr-1" aria-hidden="true" />
-                              Delete
-                            </button>
-                          </div>
                         </td>
                       </tr>
                     ))}
@@ -656,7 +641,7 @@ const Quotes = () => {
         onClose={() => setDeletingQuote(null)}
         onConfirm={() => handleDeleteQuote(deletingQuote!)}
         title="Delete Quote"
-        description={`Are you sure you want to delete this quote for ${deletingQuote?.client.name}? This action cannot be undone.`}
+        description={`Are you sure you want to delete this quote for ${deletingQuote?.client.company}? This action cannot be undone.`}
         type="delete"
       />
 

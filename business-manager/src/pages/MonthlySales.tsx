@@ -14,7 +14,7 @@ interface MonthlySalesOrder extends Quote {
 
 // Helper function to format client name
 const formatClientName = (client: Quote['client']) => {
-  return typeof client === 'string' ? client : client.name;
+  return typeof client === 'string' ? client : client.company;
 };
 
 const MonthlySales = () => {
@@ -67,7 +67,8 @@ const MonthlySales = () => {
     purchased: { label: 'Purchased', classes: 'bg-purple-100 text-purple-800' },
     purchase: { label: 'Purchase Needed', classes: 'bg-yellow-100 text-yellow-800' },
     quoted: { label: 'Quoted', classes: 'bg-gray-100 text-gray-800' },
-    quote: { label: 'Quote Needed', classes: 'bg-gray-100 text-gray-800' }
+    quote: { label: 'Quote Needed', classes: 'bg-gray-100 text-gray-800' },
+    shipment: { label: 'Shipment', classes: 'bg-yellow-100 text-yellow-800' }
   }), []);
 
   useEffect(() => {
@@ -301,35 +302,40 @@ const MonthlySales = () => {
               onChange={(e) => handleEditChange('product', e.target.value)}
               placeholder="Enter product name"
               required
+              className={`${(editingOrder?.status as string) === 'shipment' ? 'col-span-2' : ''}`}
             />
 
-            <SelectField
-              id="platform"
-              name="platform"
-              label="Platform"
-              value={editingOrder?.platform || ''}
-              onChange={(e) => handleEditChange('platform', e.target.value)}
-              options={platformOptions.map(platform => ({
-                value: platform,
-                label: platform
-              }))}
-              placeholder="Select platform"
-              required
-            />
+            {(editingOrder?.status as string) !== 'shipment' && (
+              <>
+                <SelectField
+                  id="platform"
+                  name="platform"
+                  label="Platform"
+                  value={editingOrder?.platform || ''}
+                  onChange={(e) => handleEditChange('platform', e.target.value)}
+                  options={platformOptions.map(platform => ({
+                    value: platform,
+                    label: platform
+                  }))}
+                  placeholder="Select platform"
+                  required
+                />
 
-            <SelectField
-              id="paymentMethod"
-              name="paymentMethod"
-              label="Payment Method"
-              value={editingOrder?.paymentMethod || ''}
-              onChange={(e) => handleEditChange('paymentMethod', e.target.value)}
-              options={paymentOptions.map(method => ({
-                value: method,
-                label: method
-              }))}
-              placeholder="Select payment method"
-              required
-            />
+                <SelectField
+                  id="paymentMethod"
+                  name="paymentMethod"
+                  label="Payment Method"
+                  value={editingOrder?.paymentMethod || ''}
+                  onChange={(e) => handleEditChange('paymentMethod', e.target.value)}
+                  options={paymentOptions.map(method => ({
+                    value: method,
+                    label: method
+                  }))}
+                  placeholder="Select payment method"
+                  required
+                />
+              </>
+            )}
           </div>
 
           <div>
@@ -339,14 +345,18 @@ const MonthlySales = () => {
             <StatusGroup
               value={editingOrder?.status || 'purchased'}
               onChange={(value: string) => handleEditChange('status', value)}
-              options={[
-                { value: 'quote', label: 'Quote Needed' },
-                { value: 'quoted', label: 'Quoted' },
-                { value: 'purchase', label: 'Purchase Needed' },
-                { value: 'purchased', label: 'Purchased' },
-                { value: 'received', label: 'Received' },
-                { value: 'paid', label: 'Paid' }
-              ]}
+              options={
+                (editingOrder?.status as string) === 'shipment' 
+                ? [{ value: 'shipment', label: 'Shipment' }]
+                : [
+                    { value: 'quote', label: 'Quote Needed' },
+                    { value: 'quoted', label: 'Quoted' },
+                    { value: 'purchase', label: 'Purchase Needed' },
+                    { value: 'purchased', label: 'Purchased' },
+                    { value: 'received', label: 'Received' },
+                    { value: 'paid', label: 'Paid' }
+                  ]
+              }
             />
           </div>
 
@@ -371,6 +381,7 @@ const MonthlySales = () => {
                 handleEditChange('charged', calculatedAmount);
               }}
               selectedPercentage={null}
+              cost={editingOrder?.cost}
             />
           </div>
 
@@ -401,7 +412,9 @@ const MonthlySales = () => {
             <p>You are about to update the following order:</p>
             <ul className="mt-2 list-disc list-inside">
               <li>Product: {editingOrder?.product}</li>
-              <li>Platform: {editingOrder?.platform}</li>
+              {(editingOrder?.status as string) !== 'shipment' && (
+                <li>Platform: {editingOrder?.platform}</li>
+              )}
               <li>Status: {editingOrder?.status}</li>
               <li>Cost: {formatters.currency(editingOrder?.cost || 0)}</li>
               <li>Charged Amount: {formatters.currency(editingOrder?.charged || 0)}</li>
@@ -439,16 +452,7 @@ const MonthlySales = () => {
                       Product
                     </th>
                     <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
-                      Platform
-                    </th>
-                    <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
                       Who
-                    </th>
-                    <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
-                      Order
-                    </th>
-                    <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
-                      Payment
                     </th>
                     <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
                       Status
@@ -469,25 +473,16 @@ const MonthlySales = () => {
                     <tr 
                       key={order.id} 
                       onClick={() => handleRowClick(order)}
-                      className="group hover:bg-gray-50 transition-colors duration-150 cursor-pointer"
+                      className="hover:bg-gray-50 transition-colors duration-150"
                     >
-                      <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm text-gray-900 sm:pl-6">
+                      <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm text-gray-500 sm:pl-6">
                         {formatters.date(order.createdAt)}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-900">
+                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
                         {order.product}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-900">
-                        {order.platform}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-900">
+                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
                         {formatClientName(order.client)}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-900">
-                        {order.orderNumber}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-900">
-                        {order.paymentMethod}
                       </td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm">
                         <span className={`inline-flex rounded-full px-2 text-xs font-semibold leading-5 ${
@@ -496,27 +491,20 @@ const MonthlySales = () => {
                           {statusConfig[order.status]?.label || order.status}
                         </span>
                       </td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-900">
+                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
                         {formatters.currency(order.cost)}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-900">
+                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
                         {formatters.currency(order.charged)}
                       </td>
-                      <td className="relative px-3 py-4 text-sm text-gray-500">
-                        <div className="truncate max-w-xs">
-                          {order.notes}
-                          {order.notes && (
-                            <div className="absolute z-10 invisible group-hover:visible bg-gray-900 text-white text-sm rounded-md p-2 -mt-1 max-w-xs whitespace-normal">
-                              {order.notes}
-                            </div>
-                          )}
-                        </div>
+                      <td className="px-3 py-4 text-sm text-gray-500">
+                        {order.notes}
                       </td>
                     </tr>
                   ))}
                   {orders.length === 0 && (
                     <tr>
-                      <td colSpan={10}>
+                      <td colSpan={7}>
                         <div className="flex flex-col items-center justify-center py-12">
                           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-600 shadow-lg shadow-emerald-200">
                             <CheckIcon className="h-6 w-6 text-white" aria-hidden="true" />
