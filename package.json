@@ -4,6 +4,7 @@
     "@types/node": "^22.13.10"
   },
   "dependencies": {
-    "multer": "^1.4.5-lts.1"
+    "multer": "^1.4.5-lts.1",
+    "react-datepicker": "^8.2.0"
   }
 }

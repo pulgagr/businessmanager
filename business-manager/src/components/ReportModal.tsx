@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { Fragment } from 'react';
 import { XMarkIcon, ChartBarIcon, CalendarIcon } from '@heroicons/react/24/outline';
+import DatePicker from 'react-datepicker';
+import 'react-datepicker/dist/react-datepicker.css';
 
 interface ReportModalProps {
   isOpen: boolean;
@@ -16,8 +18,8 @@ const ReportModal: React.FC<ReportModalProps> = ({
   onGenerate,
   title = 'Generate Report'
 }) => {
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  const [startDate, setStartDate] = useState<Date | null>(null);
+  const [endDate, setEndDate] = useState<Date | null>(null);
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
 
   const statusOptions = [
@@ -32,7 +34,12 @@ const ReportModal: React.FC<ReportModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onGenerate(startDate, endDate, selectedStatuses);
+    
+    // Format dates for submission
+    const formattedStartDate = startDate ? startDate.toLocaleDateString('en-US') : '';
+    const formattedEndDate = endDate ? endDate.toLocaleDateString('en-US') : '';
+    
+    onGenerate(formattedStartDate, formattedEndDate, selectedStatuses);
   };
 
   const toggleStatus = (value: string) => {
@@ -108,33 +115,59 @@ const ReportModal: React.FC<ReportModalProps> = ({
                         </h4>
                         <div className="grid grid-cols-2 gap-4">
                           <div>
-                            <label htmlFor="startDate" className="block text-sm font-medium text-gray-700">
+                            <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 mb-1">
                               Start Date
                             </label>
-                            <input
-                              type="date"
-                              id="startDate"
-                              name="startDate"
-                              required
-                              value={startDate}
-                              onChange={(e) => setStartDate(e.target.value)}
-                              className="mt-1 block w-full rounded-md border border-gray-300 py-2 px-3 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm"
-                            />
+                            <div className="relative max-w-sm">
+                              <div className="absolute inset-y-0 start-0 flex items-center ps-3 pointer-events-none">
+                                <svg className="w-4 h-4 text-gray-500 dark:text-gray-400" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 20 20">
+                                  <path d="M20 4a2 2 0 0 0-2-2h-2V1a1 1 0 0 0-2 0v1h-3V1a1 1 0 0 0-2 0v1H6V1a1 1 0 0 0-2 0v1H2a2 2 0 0 0-2 2v2h20V4ZM0 18a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8H0v10Zm5-8h10a1 1 0 0 1 0 2H5a1 1 0 0 1 0-2Z"/>
+                                </svg>
+                              </div>
+                              <DatePicker
+                                selected={startDate}
+                                onChange={(date) => setStartDate(date)}
+                                selectsStart
+                                startDate={startDate}
+                                endDate={endDate}
+                                placeholderText="Select date"
+                                className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full ps-10 p-2.5"
+                                todayButton="Today"
+                                showMonthDropdown
+                                showYearDropdown
+                                dropdownMode="select"
+                                isClearable
+                                required
+                              />
+                            </div>
                           </div>
                           <div>
-                            <label htmlFor="endDate" className="block text-sm font-medium text-gray-700">
+                            <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 mb-1">
                               End Date
                             </label>
-                            <input
-                              type="date"
-                              id="endDate"
-                              name="endDate"
-                              required
-                              value={endDate}
-                              onChange={(e) => setEndDate(e.target.value)}
-                              min={startDate}
-                              className="mt-1 block w-full rounded-md border border-gray-300 py-2 px-3 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm"
-                            />
+                            <div className="relative max-w-sm">
+                              <div className="absolute inset-y-0 start-0 flex items-center ps-3 pointer-events-none">
+                                <svg className="w-4 h-4 text-gray-500 dark:text-gray-400" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 20 20">
+                                  <path d="M20 4a2 2 0 0 0-2-2h-2V1a1 1 0 0 0-2 0v1h-3V1a1 1 0 0 0-2 0v1H6V1a1 1 0 0 0-2 0v1H2a2 2 0 0 0-2 2v2h20V4ZM0 18a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8H0v10Zm5-8h10a1 1 0 0 1 0 2H5a1 1 0 0 1 0-2Z"/>
+                                </svg>
+                              </div>
+                              <DatePicker
+                                selected={endDate}
+                                onChange={(date) => setEndDate(date)}
+                                selectsEnd
+                                startDate={startDate}
+                                endDate={endDate}
+                                minDate={startDate}
+                                placeholderText="Select date"
+                                className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full ps-10 p-2.5"
+                                todayButton="Today"
+                                showMonthDropdown
+                                showYearDropdown
+                                dropdownMode="select"
+                                isClearable
+                                required
+                              />
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -176,7 +209,7 @@ const ReportModal: React.FC<ReportModalProps> = ({
                         </button>
                         <button
                           type="submit"
-                          disabled={selectedStatuses.length === 0}
+                          disabled={selectedStatuses.length === 0 || !startDate || !endDate}
                           className="rounded-lg px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           Generate Report
@@ -194,4 +227,4 @@ const ReportModal: React.FC<ReportModalProps> = ({
   );
 };
 
-export default ReportModal; 
+export default ReportModal;
