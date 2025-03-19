@@ -1,15 +1,35 @@
 import { useState, useEffect, useMemo } from 'react';
-import { BanknotesIcon, CurrencyDollarIcon, ChartBarIcon, ArrowTrendingUpIcon, CheckIcon } from '@heroicons/react/24/outline';
+import { BanknotesIcon, CurrencyDollarIcon, ChartBarIcon, ArrowTrendingUpIcon, CheckIcon, TruckIcon } from '@heroicons/react/24/outline';
 import { salesApi, Quote, settingsApi } from '../services/api';
 import { format } from 'date-fns';
 import FormModal from '../components/FormModal';
 import { SelectField, InputField, CurrencyField, TextAreaField, StatusGroup } from '../components/FormFields';
 
+// Define backend response types to accurately reflect API data structure
+interface OrderResponse extends Omit<Quote, 'status'> {
+  status: 'quote' | 'quoted' | 'purchase' | 'purchased' | 'received' | 'ready_to_ship' | 'held' | 'shipped' | 'paid' | 'shipment';
+  orderNumber?: string;
+  client: Quote['client'];
+}
+
 // Extend the Quote interface with additional fields needed for the monthly sales view
-interface MonthlySalesOrder extends Quote {
-  orderNumber: string;
-  paymentMethod: string;
+interface MonthlySalesOrder {
+  id: number;
+  createdAt: string;
+  updatedAt: string;
+  clientId: number;
+  client: Quote['client'];
+  product: string;
+  platform: string;
+  status: 'quote' | 'quoted' | 'purchase' | 'purchased' | 'received' | 'ready_to_ship' | 'held' | 'shipped' | 'paid' | 'shipment';
+  cost: number;
   charged: number;
+  chargedAmount: number;
+  amountPaid: number;
+  paymentMethod: string;
+  notes?: string;
+  trackingNumber?: string;
+  orderNumber: string;
 }
 
 // Helper function to format client name
@@ -48,7 +68,17 @@ const MonthlySales = () => {
   // Memoize calculations
   const totals = useMemo(() => {
     const charged = orders.reduce((sum, order) => sum + order.charged, 0);
-    const cost = orders.reduce((sum, order) => sum + order.cost, 0);
+    
+    // Updated calculation using string type checking to avoid linter errors
+    const cost = orders.reduce((sum, order) => {
+      // Check the status as a string to avoid TypeScript errors
+      const isShipment = String(order.status) === 'shipment';
+      if (isShipment) {
+        return sum + order.charged; // For shipments, use totalValue (in charged field)
+      }
+      return sum + order.cost; // For regular orders, use cost
+    }, 0);
+    
     const profit = charged - cost;
     const margin = cost > 0 ? (profit / cost) * 100 : 0;
 
@@ -62,13 +92,17 @@ const MonthlySales = () => {
 
   // Status display configuration
   const statusConfig = useMemo(() => ({
-    paid: { label: 'Paid', classes: 'bg-green-100 text-green-800' },
-    received: { label: 'Received', classes: 'bg-blue-100 text-blue-800' },
-    purchased: { label: 'Purchased', classes: 'bg-purple-100 text-purple-800' },
-    purchase: { label: 'Purchase Needed', classes: 'bg-yellow-100 text-yellow-800' },
-    quoted: { label: 'Quoted', classes: 'bg-gray-100 text-gray-800' },
-    quote: { label: 'Quote Needed', classes: 'bg-gray-100 text-gray-800' },
-    shipment: { label: 'Shipment', classes: 'bg-yellow-100 text-yellow-800' }
+    quote: { label: 'Quote', classes: 'bg-gradient-to-r from-blue-50 to-blue-100 text-blue-800 border border-blue-200' },
+  quoted: { label: 'Quoted', classes: 'bg-gradient-to-r from-indigo-50 to-indigo-100 text-indigo-800 border border-indigo-200' },
+  purchase: { label: 'Purchase', classes: 'bg-gradient-to-r from-teal-50 to-teal-100 text-teal-800 border border-teal-200' },
+  purchased: { label: 'Purchased', classes: 'bg-gradient-to-r from-green-50 to-green-100 text-green-800 border border-green-200' },
+  received: { label: 'Received', classes: 'bg-gradient-to-r from-yellow-50 to-yellow-100 text-yellow-800 border border-yellow-200' },
+  ready_to_ship: { label: 'Ready to Ship', classes: 'bg-gradient-to-r from-amber-50 to-amber-100 text-amber-800 border border-amber-200' },
+  held: { label: 'Held', classes: 'bg-gradient-to-r from-orange-50 to-orange-100 text-orange-800 border border-orange-200' },
+  shipped: { label: 'Shipped', classes: 'bg-gradient-to-r from-cyan-50 to-cyan-100 text-cyan-800 border border-cyan-200' },
+  paid: { label: 'Paid', classes: 'bg-gradient-to-r from-emerald-50 to-emerald-100 text-emerald-800 border border-emerald-200' },
+  shipment: { label: 'Shipment', classes: 'bg-gradient-to-r from-purple-50 to-purple-100 text-purple-800 border border-purple-200' }
+
   }), []);
 
   useEffect(() => {
@@ -80,12 +114,22 @@ const MonthlySales = () => {
     try {
       setLoading(true);
       const response = await salesApi.getMonthlySales(selectedMonth);
-      const formattedOrders = response.data.map(order => ({
-        ...order,
-        orderNumber: order.id.toString(),
-        paymentMethod: order.paymentMethod || 'Not specified',
-        charged: order.chargedAmount
-      }));
+      
+      // Cast the response data to include potential shipment status
+      const ordersData = response.data as OrderResponse[];
+      
+      const formattedOrders = ordersData.map(order => {
+        // Create proper MonthlySalesOrder from response
+        const formattedOrder: MonthlySalesOrder = {
+          ...order,
+          charged: order.chargedAmount,
+          orderNumber: order.status === 'shipment' ? order.orderNumber || order.id.toString() : order.id.toString(),
+          paymentMethod: order.paymentMethod || 'Not specified',
+          trackingNumber: order.status === 'shipment' ? order.orderNumber : undefined
+        };
+        return formattedOrder;
+      });
+      
       setOrders(formattedOrders);
       setError(null);
     } catch (err) {
@@ -146,6 +190,20 @@ const MonthlySales = () => {
       setIsSaving(true);
       setError(null);
 
+      // Check for shipment status using a string comparison to avoid type errors
+      const isShipment = editingOrder.status === 'shipment' as string;
+
+      if (isShipment) {
+        // For now, show a message that this feature is coming soon
+        // In a future update, implement the trackingApi integration
+        setError('Editing shipment details directly will be supported in a future update');
+        
+        // Do not close modal so user can see the error
+        setIsSaving(false);
+        return;
+      }
+
+      // Now we know it's not a shipment, so we can safely use the status
       const updatedOrder = await salesApi.updateOrder(editingOrder.id, {
         product: editingOrder.product,
         platform: editingOrder.platform,
@@ -163,7 +221,8 @@ const MonthlySales = () => {
                 ...updatedOrder.data,
                 orderNumber: updatedOrder.data.id.toString(),
                 charged: updatedOrder.data.chargedAmount,
-                paymentMethod: updatedOrder.data.paymentMethod || 'Not specified'
+                paymentMethod: updatedOrder.data.paymentMethod || 'Not specified',
+                status: editingOrder.status // Keep original status
               } 
             : order
         )
@@ -347,13 +406,15 @@ const MonthlySales = () => {
               onChange={(value: string) => handleEditChange('status', value)}
               options={
                 (editingOrder?.status as string) === 'shipment' 
-                ? [{ value: 'shipment', label: 'Shipment' }]
+                ? [
+                  { value: 'shipment', label: 'Shipment' }
+                ]
                 : [
-                    { value: 'quote', label: 'Quote Needed' },
-                    { value: 'quoted', label: 'Quoted' },
+                   
                     { value: 'purchase', label: 'Purchase Needed' },
                     { value: 'purchased', label: 'Purchased' },
                     { value: 'received', label: 'Received' },
+                    { value: 'shipped', label: 'Shipped' },
                     { value: 'paid', label: 'Paid' }
                   ]
               }
@@ -361,28 +422,54 @@ const MonthlySales = () => {
           </div>
 
           <div className="grid grid-cols-2 gap-6">
-            <CurrencyField
-              id="cost"
-              name="cost"
-              label="Cost"
-              value={editingOrder?.cost.toString() || ''}
-              onChange={(e) => handleEditChange('cost', e.target.value)}
-            />
-
-            <CurrencyField
-              id="chargedAmount"
-              name="chargedAmount"
-              label="Charged Amount"
-              value={editingOrder?.charged.toString() || ''}
-              onChange={(e) => handleEditChange('charged', e.target.value)}
-              onPercentageSelect={(percentage: number) => {
-                const cost = editingOrder?.cost || 0;
-                const calculatedAmount = Number((cost * (1 + percentage / 100)).toFixed(2));
-                handleEditChange('charged', calculatedAmount);
-              }}
-              selectedPercentage={null}
-              cost={editingOrder?.cost}
-            />
+            {(editingOrder?.status as string) === 'shipment' ? (
+              <>
+                <CurrencyField
+                  id="shippingCost"
+                  name="shippingCost"
+                  label="Shipping Cost"
+                  value={editingOrder?.cost.toString() || ''}
+                  onChange={(e) => handleEditChange('cost', e.target.value)}
+                />
+                <CurrencyField
+                  id="declaredValue"
+                  name="declaredValue"
+                  label="Declared Value"
+                  value={(editingOrder ? editingOrder.charged - (editingOrder.cost || 0) : 0).toString() || ''}
+                  onChange={(e) => {
+                    // Calculate new charged value (total) based on declared value + shipping cost
+                    const declaredValue = parseFloat(e.target.value) || 0;
+                    const shippingCost = editingOrder?.cost || 0;
+                    const totalValue = declaredValue + shippingCost;
+                    handleEditChange('charged', totalValue);
+                  }}
+                />
+              </>
+            ) : (
+              <>
+                <CurrencyField
+                  id="cost"
+                  name="cost"
+                  label="Cost"
+                  value={editingOrder?.cost.toString() || ''}
+                  onChange={(e) => handleEditChange('cost', e.target.value)}
+                />
+                <CurrencyField
+                  id="chargedAmount"
+                  name="chargedAmount"
+                  label="Charged Amount"
+                  value={editingOrder?.charged.toString() || ''}
+                  onChange={(e) => handleEditChange('charged', e.target.value)}
+                  onPercentageSelect={(percentage: number) => {
+                    const cost = editingOrder?.cost || 0;
+                    const calculatedAmount = Number((cost * (1 + percentage / 100)).toFixed(2));
+                    handleEditChange('charged', calculatedAmount);
+                  }}
+                  selectedPercentage={null}
+                  cost={editingOrder?.cost}
+                />
+              </>
+            )}
           </div>
 
           <TextAreaField
@@ -415,9 +502,20 @@ const MonthlySales = () => {
               {(editingOrder?.status as string) !== 'shipment' && (
                 <li>Platform: {editingOrder?.platform}</li>
               )}
-              <li>Status: {editingOrder?.status}</li>
-              <li>Cost: {formatters.currency(editingOrder?.cost || 0)}</li>
-              <li>Charged Amount: {formatters.currency(editingOrder?.charged || 0)}</li>
+              <li>Status: {statusConfig[editingOrder?.status || 'purchased']?.label || editingOrder?.status}</li>
+              
+              {(editingOrder?.status as string) === 'shipment' ? (
+                <>
+                  <li>Shipping Cost: {formatters.currency(editingOrder?.cost || 0)}</li>
+                  <li>Declared Value: {formatters.currency((editingOrder?.charged || 0) - (editingOrder?.cost || 0))}</li>
+                  <li>Total Value: {formatters.currency(editingOrder?.charged || 0)}</li>
+                </>
+              ) : (
+                <>
+                  <li>Cost: {formatters.currency(editingOrder?.cost || 0)}</li>
+                  <li>Charged Amount: {formatters.currency(editingOrder?.charged || 0)}</li>
+                </>
+              )}
             </ul>
           </div>
         </div>
@@ -479,7 +577,14 @@ const MonthlySales = () => {
                         {formatters.date(order.createdAt)}
                       </td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                        {order.product}
+                        {order.status === 'shipment' ? (
+                          <span className="flex items-center">
+                            <TruckIcon className="h-4 w-4 mr-1 text-gray-400" aria-hidden="true" />
+                            {order.trackingNumber || order.orderNumber}
+                          </span>
+                        ) : (
+                          order.product
+                        )}
                       </td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
                         {formatClientName(order.client)}
@@ -492,7 +597,14 @@ const MonthlySales = () => {
                         </span>
                       </td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                        {formatters.currency(order.cost)}
+                        {order.status === 'shipment' ? (
+                          <div>
+                            <div className="font-medium">{formatters.currency(order.charged)}</div>
+                          
+                          </div>
+                        ) : (
+                          formatters.currency(order.cost)
+                        )}
                       </td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
                         {formatters.currency(order.charged)}

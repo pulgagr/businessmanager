@@ -54,7 +54,8 @@ const Layout = ({ children }: LayoutProps) => {
         { name: 'Missing Quotes', href: '/missing-quotes', icon: ExclamationCircleIcon },
         { name: 'Monthly Sales', href: '/monthly-sales', icon: ChartBarIcon },
         { name: 'Unpaid Orders', href: '/unpaid-orders', icon: CurrencyDollarIcon },
-        { name: 'Shipments', href: '/tracking', icon: TruckIcon },
+        { name: 'Shipments Management', href: '/tracking', icon: TruckIcon },
+        { name: 'Delivery Tracker', href: '/shipments-list', icon: TruckIcon },
       ]
     },
     {

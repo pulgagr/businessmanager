@@ -28,6 +28,7 @@ const ReportModal: React.FC<ReportModalProps> = ({
     { value: 'purchase', label: 'Purchase Needed' },
     { value: 'purchased', label: 'Purchased' },
     { value: 'received', label: 'Received' },
+    { value: 'shipped', label: 'Shipped' },
     { value: 'paid', label: 'Paid' },
     { value: 'shipment', label: 'Shipment' }
   ];

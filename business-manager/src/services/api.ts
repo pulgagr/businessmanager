@@ -22,7 +22,7 @@ export interface Quote {
   client: Client;
   product: string;
   platform: string;
-  status: 'quote' | 'quoted' | 'purchase' | 'purchased' | 'received' | 'paid';
+  status: 'quote' | 'quoted' | 'purchase' | 'purchased' | 'received' | 'ready_to_ship' | 'held' | 'shipped' | 'paid';
   cost: number;
   chargedAmount: number;
   amountPaid: number;
@@ -83,15 +83,19 @@ export interface Tracking {
   createdAt: string;
   updatedAt: string;
   clientId: string;
+  quotes: Quote[];
+  client?: Client;
+  clientName?: string;
 }
 
 export interface CreateTrackingData {
   trackingNumber: string;
   quoteIds: number[];
-  clientId: number;
-  status?: 'pending' | 'in_transit' | 'delivered';
+  clientId: string;
+  status?: 'pending' | 'in_transit' | 'delivered' | 'received' | 'ready_to_ship' | 'held' | 'shipped' | 'paid';
   declaredValue: number;
   shippingCost: number;
+  totalValue: number;
 }
 
 const api = axios.create({
@@ -243,14 +247,14 @@ export const dashboardApi = {
 // Tracking API
 export const trackingApi = {
   getAll: () => api.get<Tracking[]>('/tracking'),
-  getById: (id: number) => api.get<Tracking>(`/tracking/${id}`),
+  getById: (id: string) => api.get<Tracking>(`/tracking/${id}`),
   create: (data: CreateTrackingData) => api.post<Tracking>('/tracking', data),
-  update: (id: number, data: Partial<CreateTrackingData>) => api.put<Tracking>(`/tracking/${id}`, data),
-  updateStatus: (id: number, status: 'pending' | 'in_transit' | 'delivered' | 'paid') => 
+  update: (id: string, data: Partial<CreateTrackingData>) => api.put<Tracking>(`/tracking/${id}`, data),
+  updateStatus: (id: string, status: 'pending' | 'in_transit' | 'delivered' | 'received' | 'ready_to_ship' | 'held' | 'shipped' | 'paid') => 
     api.patch<Tracking>(`/tracking/${id}/status`, { status }),
-  updatePayment: (id: number, amountPaid: number, status?: string) => 
+  updatePayment: (id: string, amountPaid: number, status?: string) => 
     api.patch<Tracking>(`/tracking/${id}/payment`, { amountPaid, status }),
-  delete: (id: number) => api.delete(`/tracking/${id}`),
+  delete: (id: string) => api.delete(`/tracking/${id}`),
 };
 
 export default api; 

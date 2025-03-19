@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { format } from 'date-fns';
 import {
   PencilIcon,
@@ -7,7 +7,13 @@ import {
   TruckIcon,
   CurrencyDollarIcon,
   DocumentDuplicateIcon,
-  CheckCircleIcon
+  CheckCircleIcon,
+  QueueListIcon,
+  ArrowPathIcon,
+  InboxIcon,
+  ClockIcon,
+  ShoppingCartIcon,
+  CheckIcon
 } from '@heroicons/react/24/outline';
 import { trackingApi, quoteApi, clientApi, Tracking, Quote, Client } from '../services/api';
 import FormModal from '../components/FormModal';
@@ -17,11 +23,13 @@ import axios from 'axios';
 
 interface TrackingForm {
   trackingNumber: string;
+  clientId: string;
   quoteIds: number[];
-  clientId: number;
-  declaredValue: number;
   shippingCost: number;
-  status?: 'pending' | 'in_transit' | 'delivered';
+  totalValue: number;
+  declaredValue: number;
+  amountPaid?: number;
+  status: 'pending' | 'in_transit' | 'delivered' | 'received' | 'ready_to_ship' | 'held' | 'shipped' | 'paid';
 }
 
 // Define the response structure from the backend API
@@ -32,14 +40,23 @@ interface ApiResponse<T> {
 const STATUS_COLORS = {
   pending: 'bg-yellow-100 text-yellow-800',
   in_transit: 'bg-blue-100 text-blue-800',
-  delivered: 'bg-green-100 text-green-800'
+  delivered: 'bg-green-100 text-green-800',
+  received: 'bg-purple-100 text-purple-800',
+  ready_to_ship: 'bg-indigo-100 text-indigo-800',
+  held: 'bg-orange-100 text-orange-800',
+  shipped: 'bg-green-100 text-green-800',
+  paid: 'bg-emerald-100 text-emerald-800'
 };
 
 const STATUS_LABELS = {
   pending: 'Pending',
   paid: 'Paid',
   in_transit: 'In Transit',
-  delivered: 'Delivered'
+  delivered: 'Delivered',
+  received: 'Received',
+  ready_to_ship: 'Ready to Ship',
+  held: 'Holding Queue',
+  shipped: 'Shipped'
 };
 
 const TrackingPage: React.FC = () => {
@@ -50,14 +67,17 @@ const TrackingPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showBatchShipModal, setShowBatchShipModal] = useState(false);
   const [editingTracking, setEditingTracking] = useState<Tracking | null>(null);
   const [deletingTracking, setDeletingTracking] = useState<Tracking | null>(null);
+  const [selectedItems, setSelectedItems] = useState<Quote[]>([]);
   const [form, setForm] = useState<TrackingForm>({
     trackingNumber: '',
+    clientId: '',
     quoteIds: [],
-    clientId: 0,
-    declaredValue: 0,
     shippingCost: 0,
+    totalValue: 0,
+    declaredValue: 0,
     status: 'pending'
   });
 
@@ -95,15 +115,16 @@ const TrackingPage: React.FC = () => {
       // Set clients
       setClients(clientsResponse.data);
       
-      // Filter quotes to only show those with status 'purchased' or 'received'
-      // and are not already in a tracking
+      // Filter quotes to include those with relevant statuses and not already in a tracking
       const existingQuoteIds = trackings.flatMap(t => t.quotes.map(q => q.id));
-      const purchasedQuotes = quotesResponse.data.filter(
-        quote => (quote.status === 'purchased' || quote.status === 'received') &&
+      const relevantQuotes = quotesResponse.data.filter(
+        quote => (
+          ['purchased', 'received', 'ready_to_ship', 'held'].includes(quote.status) &&
           !existingQuoteIds.includes(quote.id)
+        )
       );
 
-      setAvailableQuotes(purchasedQuotes);
+      setAvailableQuotes(relevantQuotes);
       setError(null);
     } catch (err) {
       console.error('Error fetching data:', err);
@@ -115,23 +136,62 @@ const TrackingPage: React.FC = () => {
   };
 
   const handleInputChange = (field: keyof TrackingForm, value: any) => {
-    setForm(prev => ({
-      ...prev,
-      [field]: value
-    }));
+    // Handle number conversions properly to avoid NaN values
+    if (field === 'shippingCost' || field === 'declaredValue' || field === 'amountPaid') {
+      // Convert to number and ensure it's not NaN
+      const numValue = typeof value === 'string' ? parseFloat(value) : value;
+      setForm({
+        ...form,
+        [field]: isNaN(numValue) ? 0 : numValue
+      });
+    } else if (field === 'quoteIds') {
+      // Ensure quoteIds is always an array of numbers
+      const idsArray = Array.isArray(value) ? value : [value];
+      setForm({
+        ...form,
+        quoteIds: idsArray.map(id => typeof id === 'string' ? parseInt(id, 10) : id)
+      });
+    } else {
+      // Handle other fields normally
+      setForm({
+        ...form,
+        [field]: value
+      });
+    }
   };
 
   const handleSubmit = async () => {
     try {
+      console.log('Form data being submitted:', JSON.stringify(form, null, 2));
+      
+      // Make sure all required fields are present and properly formatted
+      const trackingData = {
+        ...form,
+        // Calculate totalValue as the sum of shipping cost + declared value
+        totalValue: (form.shippingCost || 0) + (form.declaredValue || 0)
+      };
+
+      console.log('Processed tracking data:', JSON.stringify(trackingData, null, 2));
+      
       if (editingTracking) {
-        await trackingApi.update(editingTracking.id, form);
+        const response = await trackingApi.update(editingTracking.id, trackingData);
+        console.log('Update response:', response);
       } else {
-        await trackingApi.create(form);
+        const response = await trackingApi.create(trackingData);
+        console.log('Create response:', response);
       }
+      
       await fetchData();
       handleCloseModal();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save tracking');
+      console.error('API Error details:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Failed to save tracking';
+      setError(errorMessage);
+      
+      // Log additional error details to help debugging
+      if (err && typeof err === 'object' && 'response' in err) {
+        console.error('API Response data:', (err as any).response?.data);
+      }
     }
   };
 
@@ -147,7 +207,7 @@ const TrackingPage: React.FC = () => {
     }
   };
 
-  const handleUpdateStatus = async (trackingId: number, status: 'pending' | 'in_transit' | 'delivered') => {
+  const handleUpdateStatus = async (trackingId: string, status: 'pending' | 'in_transit' | 'delivered' | 'received' | 'ready_to_ship' | 'held' | 'shipped' | 'paid') => {
     try {
       await trackingApi.updateStatus(trackingId, status);
       await fetchData();
@@ -161,10 +221,11 @@ const TrackingPage: React.FC = () => {
     setEditingTracking(null);
     setForm({
       trackingNumber: '',
+      clientId: '',
       quoteIds: [],
-      clientId: 0,
-      declaredValue: 0,
       shippingCost: 0,
+      totalValue: 0,
+      declaredValue: 0,
       status: 'pending'
     });
   };
@@ -179,7 +240,26 @@ const TrackingPage: React.FC = () => {
   };
 
   const getStatusBadgeClass = (status: string) => {
-    return STATUS_COLORS[status as keyof typeof STATUS_COLORS] || 'bg-gray-100 text-gray-800';
+    switch (status) {
+      case 'pending':
+        return 'bg-gradient-to-r from-yellow-50 to-yellow-100 text-yellow-800 border border-yellow-200';
+      case 'in_transit':
+        return 'bg-gradient-to-r from-blue-50 to-blue-100 text-blue-800 border border-blue-200';
+      case 'delivered':
+        return 'bg-gradient-to-r from-green-50 to-green-100 text-green-800 border border-green-200';
+      case 'ready_to_ship':
+        return 'bg-gradient-to-r from-indigo-50 to-indigo-100 text-indigo-800 border border-indigo-200';
+      case 'held':
+        return 'bg-gradient-to-r from-orange-50 to-orange-100 text-orange-800 border border-orange-200';
+      case 'received':
+        return 'bg-gradient-to-r from-purple-50 to-purple-100 text-purple-800 border border-purple-200';
+      case 'shipped':
+        return 'bg-gradient-to-r from-sky-50 to-sky-100 text-sky-800 border border-sky-200';
+      case 'paid':
+        return 'bg-gradient-to-r from-emerald-50 to-emerald-100 text-emerald-800 border border-emerald-200';
+      default:
+        return 'bg-gradient-to-r from-gray-50 to-gray-100 text-gray-800 border border-gray-200';
+    }
   };
 
   const getStatusLabel = (status: string) => {
@@ -187,7 +267,7 @@ const TrackingPage: React.FC = () => {
   };
 
   // When client changes, reset the quotes selection
-  const handleClientChange = (clientId: number) => {
+  const handleClientChange = (clientId: string) => {
     setForm(prev => ({
       ...prev,
       clientId,
@@ -203,13 +283,14 @@ const TrackingPage: React.FC = () => {
       .filter(t => t.id !== editingTracking?.id) // Don't filter out quotes from current tracking when editing
       .flatMap(t => t.quotes.map(q => q.id));
     
+    const clientIdNum = parseInt(form.clientId);
     return availableQuotes.filter(
-      quote => quote.clientId === form.clientId && !existingQuoteIds.includes(quote.id)
+      quote => quote.clientId === clientIdNum && !existingQuoteIds.includes(quote.id)
     );
   };
 
   // Set the status for the form
-  const handleStatusChange = (status: 'pending' | 'in_transit' | 'delivered') => {
+  const handleStatusChange = (status: 'pending' | 'in_transit' | 'delivered' | 'received' | 'ready_to_ship' | 'held' | 'shipped' | 'paid') => {
     setForm(prev => ({
       ...prev,
       status
@@ -225,10 +306,174 @@ const TrackingPage: React.FC = () => {
       quoteIds: tracking.quotes.map(q => q.id),
       declaredValue: tracking.declaredValue,
       shippingCost: tracking.shippingCost,
-      status: tracking.status as 'pending' | 'in_transit' | 'delivered'
+      totalValue: tracking.totalValue,
+      status: tracking.status as 'pending' | 'in_transit' | 'delivered' | 'received' | 'ready_to_ship' | 'held' | 'shipped' | 'paid'
     });
     setShowAddModal(true);
   };
+
+  // Group quotes by client for dashboard view
+  const quotesByClient = React.useMemo(() => {
+    const grouped: Record<string, {
+      client: Client,
+      quotes: {
+        readyToShip: Quote[],
+        holding: Quote[],
+        received: Quote[]
+      }
+    }> = {};
+
+    // Initialize with clients that have quotes
+    clients.forEach(client => {
+      grouped[client.id] = {
+        client,
+        quotes: {
+          readyToShip: [],
+          holding: [],
+          received: []
+        }
+      };
+    });
+
+    // Filter quotes by status and group by client
+    availableQuotes.forEach(quote => {
+      if (quote.status === 'ready_to_ship' && grouped[quote.clientId]) {
+        grouped[quote.clientId].quotes.readyToShip.push(quote);
+      } else if (quote.status === 'held' && grouped[quote.clientId]) {
+        grouped[quote.clientId].quotes.holding.push(quote);
+      } else if (quote.status === 'received' && grouped[quote.clientId]) {
+        grouped[quote.clientId].quotes.received.push(quote);
+      }
+    });
+
+    // Filter out clients with no quotes in any category
+    return Object.values(grouped).filter(group => 
+      group.quotes.readyToShip.length > 0 || 
+      group.quotes.holding.length > 0 || 
+      group.quotes.received.length > 0
+    );
+  }, [availableQuotes, clients]);
+
+  // Handle selecting items for batch shipment
+  const handleSelectItem = (item: Quote) => {
+    setSelectedItems(prev => {
+      const isSelected = prev.some(q => q.id === item.id);
+      if (isSelected) {
+        return prev.filter(q => q.id !== item.id);
+      } else {
+        // Only allow selection of items from the same client
+        if (prev.length === 0 || prev[0].clientId === item.clientId) {
+          return [...prev, item];
+        }
+        // If trying to select from different client, show error and don't select
+        setError('Can only select items from the same client for batch shipment');
+        return prev;
+      }
+    });
+  };
+
+  // Open batch ship modal
+  const handleOpenBatchShipModal = () => {
+    if (selectedItems.length === 0) {
+      setError('Please select at least one item to create a shipment');
+      return;
+    }
+
+    // Initialize form with selected items
+    setForm({
+      trackingNumber: '',
+      quoteIds: selectedItems.map(item => item.id),
+      clientId: selectedItems[0].clientId.toString(),
+      declaredValue: selectedItems.reduce((sum, item) => sum + item.chargedAmount, 0),
+      shippingCost: 0,
+      totalValue: 0, // This will be calculated at submission time
+      status: 'in_transit'
+    });
+
+    setShowBatchShipModal(true);
+  };
+
+  // Handle creating a batch shipment
+  const handleCreateBatchShipment = async () => {
+    try {
+      console.log('Batch shipment form data:', JSON.stringify(form, null, 2));
+      
+      // Make sure all required fields are present and properly formatted
+      const trackingData = {
+        ...form,
+        // Calculate totalValue as the sum of shipping cost + declared value
+        totalValue: (form.shippingCost || 0) + (form.declaredValue || 0)
+      };
+      
+      console.log('Processed batch tracking data:', JSON.stringify(trackingData, null, 2));
+      
+      const response = await trackingApi.create(trackingData);
+      console.log('Batch create response:', response);
+      
+      
+
+      // Update the status of each quote to shipped
+      await Promise.all(selectedItems.map(item => 
+        quoteApi.update(item.id, { status: 'shipped' })
+      ));
+      
+
+      await fetchData();
+      setSelectedItems([]);
+      setShowBatchShipModal(false);
+    } catch (err) {
+      console.error('API Error details:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Failed to create batch shipment';
+      setError(errorMessage);
+
+      
+      
+      // Log additional error details to help debugging
+      if (err && typeof err === 'object' && 'response' in err) {
+        console.error('API Response data:', (err as any).response?.data);
+      }
+    }
+  };
+
+  // Handle updating a quote's status
+  const handleUpdateQuoteStatus = async (quote: Quote, newStatus: 'received' | 'ready_to_ship' | 'held') => {
+    try {
+      await quoteApi.update(quote.id, { status: newStatus });
+      await fetchData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Failed to update status to ${newStatus}`);
+    }
+  };
+
+  // Add metrics calculation for the summary cards
+  const metrics = useMemo(() => {
+    if (trackings.length === 0) return {
+      totalShipments: 0,
+      totalValue: 0,
+      pendingShipments: 0,
+      completedShipments: 0,
+      declaredValue: 0,
+      shippingCost: 0
+    };
+
+    return {
+      totalShipments: trackings.length,
+      totalValue: trackings.reduce((sum, t) => sum + t.totalValue, 0),
+      pendingShipments: trackings.filter(t => ['pending', 'in_transit'].includes(t.status)).length,
+      completedShipments: trackings.filter(t => ['delivered', 'paid'].includes(t.status)).length,
+      declaredValue: trackings.reduce((sum, t) => sum + (t.declaredValue || 0), 0),
+      shippingCost: trackings.reduce((sum, t) => sum + t.shippingCost, 0)
+    };
+  }, [trackings]);
+
+  // Calculate order metrics for the dashboard
+  const orderMetrics = useMemo(() => {
+    return {
+      readyToShip: availableQuotes.filter(q => q.status === 'ready_to_ship').length,
+      inHolding: availableQuotes.filter(q => q.status === 'held').length,
+      received: availableQuotes.filter(q => q.status === 'received').length,
+    };
+  }, [availableQuotes]);
 
   if (loading) {
     return (
@@ -245,123 +490,283 @@ const TrackingPage: React.FC = () => {
     <div className="px-4 sm:px-6 lg:px-8">
       <div className="sm:flex sm:items-center">
         <div className="sm:flex-auto">
-          <h1 className="text-2xl font-semibold text-gray-900">Shipments</h1>
+          <h1 className="text-2xl font-semibold text-gray-900">Shipments Management</h1>
           <p className="mt-2 text-sm text-gray-700">
-            Manage shipments and their associated tracking numbers.
+            Manage orders and shipments with a streamlined workflow.
           </p>
         </div>
-        <div className="mt-4 sm:mt-0 sm:ml-16 sm:flex-none">
+        <div className="mt-4 sm:mt-0 sm:ml-16 sm:flex sm:space-x-3">
           <button
             type="button"
             onClick={() => setShowAddModal(true)}
-            className="inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 sm:w-auto"
+            className="inline-flex items-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
           >
-            <PlusIcon className="h-4 w-4 mr-2" />
+            <PlusIcon className="h-5 w-5 mr-2 -ml-1" />
             Add Shipment
           </button>
         </div>
       </div>
 
       {error && (
-        <div className="mt-4 bg-red-50 border border-red-200 rounded-xl p-4">
-          <div className="flex">
-            <div className="flex-shrink-0">
-              <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-              </svg>
+        <div className="mt-4 bg-red-50 border border-red-200 text-red-800 rounded-md p-4">
+          <p>{error}</p>
+          <button
+            className="mt-2 text-sm text-red-600 underline"
+            onClick={() => setError(null)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Metrics Dashboard */}
+      <div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+        {/* Total Shipments */}
+        <div className="relative bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.1)] transition-all duration-300 hover:shadow-[0_4px_12px_rgba(0,0,0,0.15)] p-6">
+          <dt>
+            <div className="absolute rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-600 p-3 shadow-lg shadow-indigo-200">
+              <TruckIcon className="h-6 w-6 text-white" aria-hidden="true" />
             </div>
-            <div className="ml-3">
-              <p className="text-sm text-red-700">{error}</p>
+            <p className="ml-16 truncate text-sm font-medium text-gray-600">Total Shipments</p>
+          </dt>
+          <dd className="ml-16 flex items-baseline pt-1">
+            <p className="text-2xl font-semibold text-gray-900">{metrics.totalShipments}</p>
+          </dd>
+        </div>
+
+        {/* Total Value */}
+        <div className="relative bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.1)] transition-all duration-300 hover:shadow-[0_4px_12px_rgba(0,0,0,0.15)] p-6">
+          <dt>
+            <div className="absolute rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-600 p-3 shadow-lg shadow-emerald-200">
+              <CurrencyDollarIcon className="h-6 w-6 text-white" aria-hidden="true" />
             </div>
+            <p className="ml-16 truncate text-sm font-medium text-gray-600">Total Value</p>
+          </dt>
+          <dd className="ml-16 flex items-baseline pt-1">
+            <p className="text-2xl font-semibold text-gray-900">{formatCurrency(metrics.totalValue)}</p>
+          </dd>
+        </div>
+
+        {/* Pending Shipments */}
+        <div className="relative bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.1)] transition-all duration-300 hover:shadow-[0_4px_12px_rgba(0,0,0,0.15)] p-6">
+          <dt>
+            <div className="absolute rounded-xl bg-gradient-to-br from-yellow-500 to-yellow-600 p-3 shadow-lg shadow-yellow-200">
+              <ClockIcon className="h-6 w-6 text-white" aria-hidden="true" />
+            </div>
+            <p className="ml-16 truncate text-sm font-medium text-gray-600">Pending Shipments</p>
+          </dt>
+          <dd className="ml-16 flex items-baseline pt-1">
+            <p className="text-2xl font-semibold text-gray-900">{metrics.pendingShipments}</p>
+          </dd>
+        </div>
+
+        {/* Completed Shipments */}
+        <div className="relative bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.1)] transition-all duration-300 hover:shadow-[0_4px_12px_rgba(0,0,0,0.15)] p-6">
+          <dt>
+            <div className="absolute rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 p-3 shadow-lg shadow-blue-200">
+              <CheckIcon className="h-6 w-6 text-white" aria-hidden="true" />
+            </div>
+            <p className="ml-16 truncate text-sm font-medium text-gray-600">Completed</p>
+          </dt>
+          <dd className="ml-16 flex items-baseline pt-1">
+            <p className="text-2xl font-semibold text-gray-900">{metrics.completedShipments}</p>
+          </dd>
+        </div>
+      </div>
+
+      {/* Order Metrics - Only show in dashboard view */}
+      {quotesByClient.length > 0 && (
+        <div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-3">
+          {/* Ready to Ship */}
+          <div className="relative bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.1)] transition-all duration-300 hover:shadow-[0_4px_12px_rgba(0,0,0,0.15)] p-6">
+            <dt>
+              <div className="absolute rounded-xl bg-gradient-to-br from-indigo-400 to-indigo-500 p-3 shadow-lg shadow-indigo-200">
+                <TruckIcon className="h-6 w-6 text-white" aria-hidden="true" />
+              </div>
+              <p className="ml-16 truncate text-sm font-medium text-gray-600">Ready to Ship</p>
+            </dt>
+            <dd className="ml-16 flex items-baseline pt-1">
+              <p className="text-2xl font-semibold text-gray-900">{orderMetrics.readyToShip}</p>
+            </dd>
+          </div>
+
+          {/* Holding Queue */}
+          <div className="relative bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.1)] transition-all duration-300 hover:shadow-[0_4px_12px_rgba(0,0,0,0.15)] p-6">
+            <dt>
+              <div className="absolute rounded-xl bg-gradient-to-br from-orange-400 to-orange-500 p-3 shadow-lg shadow-orange-200">
+                <QueueListIcon className="h-6 w-6 text-white" aria-hidden="true" />
+              </div>
+              <p className="ml-16 truncate text-sm font-medium text-gray-600">Holding Queue</p>
+            </dt>
+            <dd className="ml-16 flex items-baseline pt-1">
+              <p className="text-2xl font-semibold text-gray-900">{orderMetrics.inHolding}</p>
+            </dd>
+          </div>
+
+          {/* Received */}
+          <div className="relative bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.1)] transition-all duration-300 hover:shadow-[0_4px_12px_rgba(0,0,0,0.15)] p-6">
+            <dt>
+              <div className="absolute rounded-xl bg-gradient-to-br from-purple-400 to-purple-500 p-3 shadow-lg shadow-purple-200">
+                <InboxIcon className="h-6 w-6 text-white" aria-hidden="true" />
+              </div>
+              <p className="ml-16 truncate text-sm font-medium text-gray-600">Received</p>
+            </dt>
+            <dd className="ml-16 flex items-baseline pt-1">
+              <p className="text-2xl font-semibold text-gray-900">{orderMetrics.received}</p>
+            </dd>
           </div>
         </div>
       )}
 
-      <div className="mt-8 flex flex-col">
-        <div className="-my-2 -mx-4 overflow-x-auto sm:-mx-6 lg:-mx-8">
-          <div className="inline-block min-w-full py-2 align-middle md:px-6 lg:px-8">
-            <div className="overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.1)] transition-all duration-300 hover:shadow-[0_4px_12px_rgba(0,0,0,0.15)] ring-1 ring-black ring-opacity-5 md:rounded-2xl">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th scope="col" className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-6">
-                      Shipment Number
-                    </th>
-                    <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
-                      Client
-                    </th>
-                    <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
-                      Status
-                    </th>
-                    <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
-                      Items Shipped
-                    </th>
-                    <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
-                      Total
-                    </th>
-                    <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
-                      Date
-                    </th>
-                    <th scope="col" className="relative py-3.5 pl-3 pr-4 sm:pr-6">
-                      <span className="sr-only">Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200 bg-white">
-                  {trackings.map((tracking) => (
-                    <tr 
-                      key={tracking.id} 
-                      onClick={() => handleRowClick(tracking)}
-                      className="cursor-pointer hover:bg-gray-50 transition-colors duration-150"
-                    >
-                      <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">
-                        {tracking.trackingNumber}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                        {tracking.clientName}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusBadgeClass(tracking.status)}`}>
-                          {getStatusLabel(tracking.status)}
-                        </span>
-                      </td>
-                      <td className="px-3 py-4 text-sm text-gray-500">
-                        <div className="max-w-md truncate">
-                          {tracking.quotes.map(q => q.product).join(', ')}
-                        </div>
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                        {formatCurrency(tracking.totalValue)}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                        {format(new Date(tracking.createdAt), 'MMM d, yyyy')}
-                      </td>
-                      <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
-                        {/* Only show Delivered button when status is pending */}
-                        {tracking.status === 'pending' && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation(); // Prevent row click
-                              handleUpdateStatus(tracking.id, 'delivered');
-                            }}
-                            className="inline-flex items-center rounded-md bg-white px-2.5 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
-                            title="Mark as Delivered"
-                          >
-                            <CheckCircleIcon className="h-4 w-4 mr-1" />
-                            Delivered
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+      <div className="mt-8">
+        <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.1)] transition-all duration-300 hover:shadow-[0_4px_12px_rgba(0,0,0,0.15)] overflow-hidden">
+          <div className="border-b border-gray-200 px-6 py-5">
+            <h3 className="text-lg font-semibold text-gray-900">Order Management Dashboard</h3>
+            <p className="mt-1 text-sm text-gray-500">Manage your items and create shipments</p>
+          </div>
+          <div className="p-6">
+            <div>
+              {/* Orders Ready for Shipment */}
+              <div className="mb-8">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium text-gray-900">Orders Ready for Shipment</h3>
+                  {selectedItems.length !== 0 && (
+  <button
+    type="button"
+    onClick={handleOpenBatchShipModal}
+    className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+  >
+    <DocumentDuplicateIcon className="h-5 w-5 mr-2" />
+    Create Batch Shipment
+  </button>
+)}
+
+                </div>
+                
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                  {availableQuotes.filter(q => q.status === 'ready_to_ship' || q.status === 'held' || q.status === 'received').length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                                onChange={e => {
+                                  const isChecked = e.target.checked;
+                                  setSelectedItems(isChecked ? availableQuotes.filter(q => 
+                                    q.status === 'ready_to_ship' || q.status === 'held' || q.status === 'received'
+                                  ) : []);
+                                }}
+                                checked={selectedItems.length > 0 && selectedItems.length === availableQuotes.filter(q => 
+                                  q.status === 'ready_to_ship' || q.status === 'held' || q.status === 'received'
+                                ).length}
+                              />
+                            </th>
+                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Order</th>
+                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Client</th>
+                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                            <th scope="col" className="relative px-6 py-3">
+                              <span className="sr-only">Actions</span>
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {availableQuotes
+                            .filter(q => q.status === 'ready_to_ship' || q.status === 'held' || q.status === 'received')
+                            .map(quote => (
+                              <tr key={quote.id} className="hover:bg-gray-50 transition-colors duration-150">
+                                <td className="px-6 py-4 whitespace-nowrap">
+                                  <input
+                                    type="checkbox"
+                                    className="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                                    checked={selectedItems.some(item => item.id === quote.id)}
+                                    onChange={() => handleSelectItem(quote)}
+                                  />
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                  {quote.product}
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                  {quote.client.company || quote.client.name}
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap">
+                                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusBadgeClass(quote.status)}`}>
+                                    {getStatusLabel(quote.status)}
+                                  </span>
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                  {formatCurrency(quote.chargedAmount)}
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                  {format(new Date(quote.createdAt), 'MMM d, yyyy')}
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                  {quote.status === 'received' && (
+                                    <>
+                                      <button
+                                        onClick={() => handleUpdateQuoteStatus(quote, 'ready_to_ship')}
+                                        className="inline-flex items-center px-2.5 py-1.5 border border-transparent text-xs font-medium rounded text-indigo-700 bg-indigo-100 hover:bg-indigo-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                                      >
+                                        <TruckIcon className="h-4 w-4 mr-1" />
+                                        Ready to Ship
+                                      </button>
+                                      <button
+                                        onClick={() => handleUpdateQuoteStatus(quote, 'held')}
+                                        className="inline-flex items-center px-2.5 py-1.5 border border-transparent text-xs font-medium rounded text-orange-700 bg-orange-100 hover:bg-orange-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
+                                      >
+                                        <QueueListIcon className="h-4 w-4 mr-1" />
+                                        Hold
+                                      </button>
+                                    </>
+                                  )}
+                                  {quote.status === 'held' && (
+                                    <button
+                                      onClick={() => handleUpdateQuoteStatus(quote, 'ready_to_ship')}
+                                      className="inline-flex items-center px-2.5 py-1.5 border border-transparent text-xs font-medium rounded text-indigo-700 bg-indigo-100 hover:bg-indigo-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                                    >
+                                      <TruckIcon className="h-4 w-4 mr-1" />
+                                      Ready to Ship
+                                    </button>
+                                  )}
+                                  {quote.status === 'ready_to_ship' && (
+                                    <button
+                                      onClick={() => handleUpdateQuoteStatus(quote, 'held')}
+                                      className="inline-flex items-center px-2.5 py-1.5 border border-transparent text-xs font-medium rounded text-orange-700 bg-orange-100 hover:bg-orange-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
+                                    >
+                                      <QueueListIcon className="h-4 w-4 mr-1" />
+                                      Hold
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="py-12 flex flex-col items-center justify-center">
+                      <ShoppingCartIcon className="h-12 w-12 text-gray-300 mb-4" />
+                      <h3 className="text-lg font-medium text-gray-900">No orders ready for shipment</h3>
+                      <p className="mt-1 text-sm text-gray-500">
+                        When orders are ready for shipment, they will appear here
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Recent Shipments */}
+              
             </div>
           </div>
         </div>
       </div>
 
-      {/* Add/Edit Modal */}
+      {/* Add Tracking Modal */}
       <FormModal
         isOpen={showAddModal}
         onClose={handleCloseModal}
@@ -369,149 +774,123 @@ const TrackingPage: React.FC = () => {
         title={editingTracking ? 'Edit Shipment' : 'Add Shipment'}
         description="Enter the shipment details below."
       >
-        <div className="space-y-6">
-          <InputField
-            id="trackingNumber"
-            name="trackingNumber"
-            label="Shipment Number"
-            value={form.trackingNumber}
-            onChange={(e) => handleInputChange('trackingNumber', e.target.value)}
+        <div className="space-y-4">
+          <SelectField
+            label="Client"
+            id="clientId"
+            name="clientId"
+            value={form.clientId || ''}
+            onChange={(e) => handleClientChange(e.target.value)}
+            options={clients.map(client => ({
+              value: client.id,
+              label: client.company || client.name
+            }))}
             required
           />
 
-          {/* Client Selection */}
-          <div className="form-group">
-            <label htmlFor="clientId" className="block text-base font-medium text-gray-900 mb-2">
-              Client <span className="text-red-500">*</span>
-            </label>
-            <select
-              id="clientId"
-              name="clientId"
-              className="block w-full rounded-xl border border-gray-300 bg-white py-3 px-4 text-gray-900 shadow-sm hover:border-gray-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none transition-colors duration-200"
-              value={form.clientId}
-              onChange={(e) => handleClientChange(Number(e.target.value))}
-              required
-            >
-              <option value="">Select a client...</option>
-              {clients.map(client => (
-                <option key={client.id} value={client.id}>
-                  {client.name} ({client.company || 'No Company'})
-                </option>
-              ))}
-            </select>
-          </div>
+          <InputField
+            label="Tracking Number"
+            id="trackingNumber"
+            name="trackingNumber"
+            type="text"
+            value={form.trackingNumber}
+            onChange={(e) => handleInputChange('trackingNumber', e.target.value)}
+            placeholder="Enter tracking number"
+            required
+          />
 
-          {/* Associated Purchases - Improved UI & simplified presentation */}
-          <div className="form-group">
-            <label className="block text-base font-medium text-gray-900 mb-2">
-              Associated Purchases <span className="text-red-500">*</span>
-            </label>
-            
-            {!form.clientId && (
-              <div className="text-sm text-gray-500 p-4 bg-gray-50 rounded-xl border border-gray-200">
-                Please select a client first to see available purchases
-              </div>
-            )}
-            
-            {form.clientId && getAvailableQuotesForClient().length === 0 && (
-              <div className="text-sm text-amber-600 p-4 bg-amber-50 rounded-xl border border-amber-200">
-                No available purchases for this client. All purchases are already assigned to shipments.
-              </div>
-            )}
-            
-            {form.clientId && getAvailableQuotesForClient().length > 0 && (
-              <div className="max-h-60 overflow-y-auto border border-gray-300 rounded-xl divide-y divide-gray-200">
-                {getAvailableQuotesForClient().map(quote => (
-                  <div 
-                    key={quote.id} 
-                    className={`p-3 hover:bg-gray-50 cursor-pointer flex items-center ${form.quoteIds.includes(quote.id) ? 'bg-indigo-50' : ''}`}
-                    onClick={() => {
-                      const newQuoteIds = form.quoteIds.includes(quote.id)
-                        ? form.quoteIds.filter(id => id !== quote.id)
-                        : [...form.quoteIds, quote.id];
-                      handleInputChange('quoteIds', newQuoteIds);
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={form.quoteIds.includes(quote.id)}
-                      onChange={() => {}}
-                      className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
-                    />
-                    <div className="ml-3 flex-1">
-                      <div className="flex justify-between">
-                        <span className="font-medium text-gray-900">{quote.product}</span>
-                        <span className="font-semibold text-gray-700">{formatCurrency(quote.chargedAmount)}</span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-            
-            {form.clientId && form.quoteIds.length > 0 && (
-              <div className="mt-2 text-sm text-gray-500">
-                {form.quoteIds.length} item{form.quoteIds.length > 1 ? 's' : ''} selected
-              </div>
-            )}
-          </div>
-
-          {/* Status Buttons */}
-          <div className="form-group">
-            <label className="block text-base font-medium text-gray-900 mb-2">
-              Status
-            </label>
-            <div className="flex space-x-4">
-              <button
-                type="button"
-                onClick={() => handleStatusChange('in_transit')}
-                className={`flex-1 inline-flex items-center justify-center rounded-md border ${
-                  form.status === 'in_transit' 
-                    ? 'bg-blue-100 border-blue-300 text-blue-800 font-medium' 
-                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
-                } px-4 py-2 text-sm`}
-              >
-                <TruckIcon className="h-4 w-4 mr-2" />
-                In Transit
-              </button>
-              
-              <button
-                type="button"
-                onClick={() => handleStatusChange('delivered')}
-                className={`flex-1 inline-flex items-center justify-center rounded-md border ${
-                  form.status === 'delivered' 
-                    ? 'bg-green-100 border-green-300 text-green-800 font-medium' 
-                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
-                } px-4 py-2 text-sm`}
-              >
-                <CheckCircleIcon className="h-4 w-4 mr-2" />
-                Delivered
-              </button>
-            </div>
-            
-            <div className="mt-2 text-xs text-gray-500">
-              {form.status === 'pending' && "Current status: Pending"}
-              {form.status === 'in_transit' && "Current status: In Transit"}
-              {form.status === 'delivered' && "Current status: Delivered"}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <CurrencyField
-              id="declaredValue"
-              name="declaredValue"
-              label="Declared Value"
-              value={form.declaredValue.toString()}
-              onChange={(e) => handleInputChange('declaredValue', parseFloat(e.target.value) || 0)}
+              label="Shipping Cost"
+              id="shippingCost"
+              name="shippingCost"
+              value={form.shippingCost}
+              onChange={(e) => handleInputChange('shippingCost', parseFloat(e.target.value))}
+              placeholder="0.00"
               required
             />
 
             <CurrencyField
+              label="Declared Value"
+              id="declaredValue"
+              name="declaredValue"
+              value={form.declaredValue}
+              onChange={(e) => handleInputChange('declaredValue', parseFloat(e.target.value))}
+              placeholder="0.00"
+              required
+            />
+          </div>
+
+          <SelectField
+            label="Status"
+            id="status"
+            name="status"
+            value={form.status}
+            onChange={(e) => handleStatusChange(e.target.value as 'pending' | 'in_transit' | 'delivered' | 'received' | 'ready_to_ship' | 'held' | 'shipped' | 'paid')}
+            options={[
+              { value: 'pending', label: 'Pending' },
+              { value: 'in_transit', label: 'In Transit' },
+              { value: 'delivered', label: 'Delivered' }
+            ]}
+            required
+          />
+        </div>
+      </FormModal>
+
+      {/* Batch Ship Modal */}
+      <FormModal
+        isOpen={showBatchShipModal}
+        onClose={() => setShowBatchShipModal(false)}
+        onSubmit={handleCreateBatchShipment}
+        title="Create Batch Shipment"
+        description={`Creating shipment with ${selectedItems.length} selected items.`}
+      >
+        <div className="space-y-4">
+          <div className="bg-gray-50 p-4 rounded-lg mb-4">
+            <h3 className="text-sm font-medium text-gray-700 mb-2">Selected Items:</h3>
+            <div className="text-sm text-gray-600 space-y-1 max-h-40 overflow-y-auto">
+              {selectedItems.map(item => (
+                <div key={item.id} className="flex justify-between">
+                  <span>{item.product}</span>
+                  <span>{formatCurrency(item.chargedAmount)}</span>
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 pt-2 border-t border-gray-200 flex justify-between text-sm font-medium">
+              <span>Total Value:</span>
+              <span>{formatCurrency(selectedItems.reduce((sum, item) => sum + item.chargedAmount, 0))}</span>
+            </div>
+          </div>
+
+          <InputField
+            label="Tracking Number"
+            id="trackingNumber"
+            name="trackingNumber"
+            type="text"
+            value={form.trackingNumber}
+            onChange={(e) => handleInputChange('trackingNumber', e.target.value)}
+            placeholder="Enter tracking number"
+            required
+          />
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <CurrencyField
+              label="Shipping Cost"
               id="shippingCost"
               name="shippingCost"
-              label="Shipping Cost"
-              value={form.shippingCost.toString()}
-              onChange={(e) => handleInputChange('shippingCost', parseFloat(e.target.value) || 0)}
+              value={form.shippingCost}
+              onChange={(e) => handleInputChange('shippingCost', parseFloat(e.target.value))}
+              placeholder="0.00"
+              required
+            />
+
+            <CurrencyField
+              label="Declared Value"
+              id="declaredValue"
+              name="declaredValue"
+              value={form.declaredValue}
+              onChange={(e) => handleInputChange('declaredValue', parseFloat(e.target.value))}
+              placeholder="0.00"
               required
             />
           </div>
@@ -520,7 +899,7 @@ const TrackingPage: React.FC = () => {
 
       {/* Delete Confirmation Modal */}
       <ConfirmationModal
-        isOpen={showDeleteModal}
+        isOpen={showDeleteModal && !!deletingTracking}
         onClose={() => setShowDeleteModal(false)}
         onConfirm={handleDelete}
         title="Delete Shipment"

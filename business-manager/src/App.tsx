@@ -11,6 +11,7 @@ import UnpaidOrders from './pages/UnpaidOrders';
 import SampleInvoice from './pages/SampleInvoice';
 import ClientReportPage from './pages/ClientReportPage';
 import TrackingPage from './pages/Tracking';
+import ShipmentsList from './pages/ShipmentsList';
 
 const LayoutWrapper = () => (
   <Layout>
@@ -33,6 +34,7 @@ function App() {
           <Route path="/settings" element={<Settings />} />
           <Route path="/unpaid-orders" element={<UnpaidOrders />} />
           <Route path="/tracking" element={<TrackingPage />} />
+          <Route path="/shipments-list" element={<ShipmentsList />} />
         </Route>
 
         {/* Routes without Layout */}

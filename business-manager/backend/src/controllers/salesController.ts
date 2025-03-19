@@ -35,7 +35,7 @@ export const getMonthlySales = async (req: Request, res: Response) => {
           lte: endDate
         },
         status: {
-          in: ['purchase', 'purchased', 'received', 'paid']
+          in: ['purchase', 'purchased', 'received', 'ready_to_ship', 'held', 'shipped', 'paid']
         }
       },
       include: {
@@ -169,7 +169,7 @@ export const getMonthlySummary = async (req: Request, res: Response) => {
           lte: endDate
         },
         status: {
-          in: ['purchase', 'purchased', 'received', 'paid']
+          in: ['purchase', 'purchased', 'received', 'ready_to_ship', 'held', 'shipped', 'paid']
         }
       },
       _count: {
@@ -189,7 +189,7 @@ export const getMonthlySummary = async (req: Request, res: Response) => {
           lte: endDate
         },
         status: {
-          in: ['purchase', 'purchased', 'received', 'paid']
+          in: ['purchase', 'purchased', 'received', 'ready_to_ship', 'held', 'shipped', 'paid']
         }
       },
       _count: {

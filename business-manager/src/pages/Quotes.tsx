@@ -592,8 +592,8 @@ const Quotes = () => {
                               quote.status === 'paid'
                                 ? 'bg-green-100 text-green-800'
                                 : quote.status === 'quoted' || quote.status === 'purchased'
-                                ? 'bg-yellow-100 text-yellow-800'
-                                : 'bg-gray-100 text-gray-800'
+                                ? 'bg-gradient-to-r from-blue-50 to-blue-100 text-blue-800 border border-blue-200'
+                                : 'bg-gradient-to-r from-green-50 to-green-100 text-green-800 border border-green-200'
                             }`}
                           >
                             {quote.status}

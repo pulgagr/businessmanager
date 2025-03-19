@@ -52,7 +52,6 @@ const UnpaidOrders = () => {
   const [selectedOrder, setSelectedOrder] = useState<UnpaidItem | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingStatus, setEditingStatus] = useState<Quote['status']>('received');
-  const [updateSuccess, setUpdateSuccess] = useState(false);
   const [showSaveConfirmation, setShowSaveConfirmation] = useState(false);
   const [metrics, setMetrics] = useState<Metrics>({
     totalUnpaid: 0,
@@ -111,24 +110,40 @@ const UnpaidOrders = () => {
           unpaidShipments = trackings
             .filter((tracking: Tracking) => tracking.status !== 'paid')
             .map((tracking: Tracking) => {
-              // Create a mock client object since client info may be in a different format
-              const clientCompany = typeof tracking.clientId === 'object' && tracking.clientId && 'company' in tracking.clientId
-                ? (tracking.clientId as any).company
-                : 'Unknown Company';
-                
-              const clientName = typeof tracking.clientId === 'object' && tracking.clientId && 'name' in tracking.clientId
-                ? (tracking.clientId as any).name
-                : 'Unknown Client';
-                
-              const client = {
-                company: clientCompany,
-                name: clientName
-              };
+              // Create a client object with fallbacks in order of preference
+              let client;
+              
+              // If tracking.client exists, use it directly
+              if (tracking.client) {
+                client = tracking.client;
+              }
+              // If clientName exists, create a minimal client object
+              else if (tracking.clientName) {
+                client = {
+                  company: tracking.clientName,
+                  name: tracking.clientName
+                };
+              }
+              // Handle the case where clientId contains client data (legacy format)
+              else if (typeof tracking.clientId === 'object' && tracking.clientId) {
+                const clientObj = tracking.clientId as any;
+                client = {
+                  company: 'company' in clientObj ? clientObj.company : 'Unknown Company',
+                  name: 'name' in clientObj ? clientObj.name : 'Unknown Client'
+                };
+              }
+              // Default fallback
+              else {
+                client = {
+                  company: 'Unknown Company',
+                  name: 'Unknown Client'
+                };
+              }
               
               return {
                 ...tracking,
                 id: tracking.id,
-                originalId: parseInt(tracking.id),
+                originalId: typeof tracking.id === 'string' ? parseInt(tracking.id) : tracking.id,
                 itemType: 'shipment' as const,
                 client,
                 product: tracking.trackingNumber,
@@ -137,7 +152,7 @@ const UnpaidOrders = () => {
                 cost: tracking.shippingCost,
                 chargedAmount: tracking.totalValue,
                 charged: tracking.totalValue,
-                orderNumber: `S-${tracking.id}`,
+                orderNumber: `S-${String(tracking.id)}`,
                 paymentMethod: 'Shipping',
                 notes: `Tracking: ${tracking.trackingNumber}`,
                 daysOverdue: calculateDaysOverdue(tracking.createdAt),
@@ -250,10 +265,10 @@ const UnpaidOrders = () => {
         // Handle shipment payment
         if (editingStatus === 'paid' || editingAmount >= selectedOrder.charged) {
           // Mark shipment as fully paid
-          await trackingApi.updatePayment(selectedOrder.originalId, editingAmount, 'paid');
+          await trackingApi.updatePayment(selectedOrder.originalId.toString(), editingAmount, 'paid');
         } else {
           // Add partial payment
-          await trackingApi.updatePayment(selectedOrder.originalId, editingAmount);
+          await trackingApi.updatePayment(selectedOrder.originalId.toString(), editingAmount);
         }
       }
       
@@ -265,12 +280,6 @@ const UnpaidOrders = () => {
       setEditingStatus('received');
       setEditingAmount(0);
       setError(null);
-      setUpdateSuccess(true);
-      
-      // Reset success message after 3 seconds
-      setTimeout(() => {
-        setUpdateSuccess(false);
-      }, 3000);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update payment');
     }
@@ -440,8 +449,8 @@ const UnpaidOrders = () => {
                         <td className="whitespace-nowrap px-3 py-4 text-sm">
                           <span className={`inline-flex rounded-full px-2 text-xs font-semibold leading-5 ${
                             (order.status as string) === 'shipment' 
-                              ? 'bg-blue-100 text-blue-800' 
-                              : 'bg-purple-100 text-purple-800'
+                              ? 'bg-gradient-to-r from-purple-50 to-purple-100 text-purple-800 border border-purple-200'
+                              : 'bg-gradient-to-r from-sky-50 to-sky-100 text-sky-800 border border-sky-200'
                           }`}>
                             {(order.status as string) === 'shipment' ? 'Shipment' : 'Order'}
                           </span>
@@ -495,107 +504,98 @@ const UnpaidOrders = () => {
                 leaveTo="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
               >
                 <Dialog.Panel className="relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg sm:p-6">
-                  {updateSuccess ? (
-                    <div className="text-center">
-                      <CheckIcon className="mx-auto h-12 w-12 text-green-500" />
-                      <p className="mt-2 text-lg font-semibold text-gray-900">Status Updated Successfully</p>
+                  <div className="absolute right-0 top-0 hidden pr-4 pt-4 sm:block">
+                    <button
+                      type="button"
+                      className="rounded-md bg-white text-gray-400 hover:text-gray-500"
+                      onClick={() => setIsEditModalOpen(false)}
+                    >
+                      <span className="sr-only">Close</span>
+                      <XMarkIcon className="h-6 w-6" />
+                    </button>
+                  </div>
+                  <div>
+                    <div className="mt-3 text-center sm:mt-5">
+                      <Dialog.Title as="h3" className="text-lg font-semibold leading-6 text-gray-900">
+                        Update Payment
+                      </Dialog.Title>
+                      <div className="mt-2">
+                        <p className="text-sm text-gray-500">
+                          Order #{selectedOrder?.orderNumber} - {selectedOrder?.product}
+                        </p>
+                        <p className="mt-1 text-sm text-gray-500">
+                          Client: {typeof selectedOrder?.client === 'string' ? selectedOrder?.client : selectedOrder?.client.company}
+                        </p>
+                        <div className="mt-4 bg-gray-50 p-4 rounded-lg">
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <p className="text-sm text-gray-500">Total Amount</p>
+                              <p className="text-lg font-semibold text-gray-900">{selectedOrder && formatCurrency(selectedOrder.charged)}</p>
+                            </div>
+                            <div>
+                              <p className="text-sm text-gray-500">Amount Paid</p>
+                              <p className="text-lg font-semibold text-green-600">{selectedOrder && formatCurrency(selectedOrder.amountPaid)}</p>
+                            </div>
+                            <div>
+                              <p className="text-sm text-gray-500">Remaining</p>
+                              <p className="text-lg font-semibold text-red-600">{selectedOrder && formatCurrency(selectedOrder.remainingAmount)}</p>
+                            </div>
+                            <div>
+                              <p className="text-sm text-gray-500">Days Overdue</p>
+                              <p className="text-lg font-semibold text-gray-900">{selectedOrder?.daysOverdue} days</p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                  ) : (
-                    <>
-                      <div className="absolute right-0 top-0 hidden pr-4 pt-4 sm:block">
-                        <button
-                          type="button"
-                          className="rounded-md bg-white text-gray-400 hover:text-gray-500"
-                          onClick={() => setIsEditModalOpen(false)}
-                        >
-                          <span className="sr-only">Close</span>
-                          <XMarkIcon className="h-6 w-6" />
-                        </button>
-                      </div>
-                      <div>
-                        <div className="mt-3 text-center sm:mt-5">
-                          <Dialog.Title as="h3" className="text-lg font-semibold leading-6 text-gray-900">
-                            Update Payment
-                          </Dialog.Title>
-                          <div className="mt-2">
-                            <p className="text-sm text-gray-500">
-                              Order #{selectedOrder?.orderNumber} - {selectedOrder?.product}
-                            </p>
-                            <p className="mt-1 text-sm text-gray-500">
-                              Client: {typeof selectedOrder?.client === 'string' ? selectedOrder?.client : selectedOrder?.client.company}
-                            </p>
-                            <div className="mt-4 bg-gray-50 p-4 rounded-lg">
-                              <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                  <p className="text-sm text-gray-500">Total Amount</p>
-                                  <p className="text-lg font-semibold text-gray-900">{selectedOrder && formatCurrency(selectedOrder.charged)}</p>
-                                </div>
-                                <div>
-                                  <p className="text-sm text-gray-500">Amount Paid</p>
-                                  <p className="text-lg font-semibold text-green-600">{selectedOrder && formatCurrency(selectedOrder.amountPaid)}</p>
-                                </div>
-                                <div>
-                                  <p className="text-sm text-gray-500">Remaining</p>
-                                  <p className="text-lg font-semibold text-red-600">{selectedOrder && formatCurrency(selectedOrder.remainingAmount)}</p>
-                                </div>
-                                <div>
-                                  <p className="text-sm text-gray-500">Days Overdue</p>
-                                  <p className="text-lg font-semibold text-gray-900">{selectedOrder?.daysOverdue} days</p>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
+                    <div className="mt-4">
+                      <label htmlFor="payment" className="block text-sm font-medium text-gray-700">
+                        Add Payment
+                      </label>
+                      <div className="relative mt-1 rounded-md shadow-sm">
+                        <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                          <span className="text-gray-500 sm:text-sm">$</span>
                         </div>
-                        <div className="mt-4">
-                          <label htmlFor="payment" className="block text-sm font-medium text-gray-700">
-                            Add Payment
-                          </label>
-                          <div className="relative mt-1 rounded-md shadow-sm">
-                            <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                              <span className="text-gray-500 sm:text-sm">$</span>
-                            </div>
-                            <input
-                              type="number"
-                              name="payment"
-                              id="payment"
-                              className="block w-full rounded-xl border border-gray-300 bg-white py-3 pl-8 pr-4 text-gray-900 shadow-sm hover:border-gray-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none transition-colors duration-200"
-                              placeholder="0.00"
-                              value={editingAmount || ''}
-                              onChange={(e) => setEditingAmount(parseFloat(e.target.value) || 0)}
-                              max={selectedOrder?.remainingAmount}
-                            />
-                          </div>
-                        </div>
+                        <input
+                          type="number"
+                          name="payment"
+                          id="payment"
+                          className="block w-full rounded-xl border border-gray-300 bg-white py-3 pl-8 pr-4 text-gray-900 shadow-sm hover:border-gray-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none transition-colors duration-200"
+                          placeholder="0.00"
+                          value={editingAmount || ''}
+                          onChange={(e) => setEditingAmount(parseFloat(e.target.value) || 0)}
+                          max={selectedOrder?.remainingAmount}
+                        />
                       </div>
-                      <div className="mt-5 sm:mt-6 sm:grid sm:grid-flow-row-dense sm:grid-cols-3 sm:gap-3">
-                        <button
-                          type="button"
-                          className="inline-flex w-full justify-center rounded-md bg-green-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-600 sm:col-start-3"
-                          onClick={handleMarkAsPaid}
-                        >
-                          Mark as Paid
-                        </button>
-                        <button
-                          type="button"
-                          className="inline-flex w-full justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 sm:col-start-2"
-                          onClick={() => setShowSaveConfirmation(true)}
-                          disabled={Boolean(!editingAmount || editingAmount <= 0 || (selectedOrder && editingAmount > selectedOrder.remainingAmount))}
-                        >
-                          Add Payment
-                        </button>
-                        <button
-                          type="button"
-                          className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:col-start-1 sm:mt-0"
-                          onClick={() => {
-                            setIsEditModalOpen(false);
-                            setEditingAmount(0);
-                          }}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </>
-                  )}
+                    </div>
+                  </div>
+                  <div className="mt-5 sm:mt-6 sm:grid sm:grid-flow-row-dense sm:grid-cols-3 sm:gap-3">
+                    <button
+                      type="button"
+                      className="inline-flex w-full justify-center rounded-md bg-green-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-600 sm:col-start-3"
+                      onClick={handleMarkAsPaid}
+                    >
+                      Mark as Paid
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex w-full justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 sm:col-start-2"
+                      onClick={() => setShowSaveConfirmation(true)}
+                      disabled={Boolean(!editingAmount || editingAmount <= 0 || (selectedOrder && editingAmount > selectedOrder.remainingAmount))}
+                    >
+                      Add Payment
+                    </button>
+                    <button
+                      type="button"
+                      className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:col-start-1 sm:mt-0"
+                      onClick={() => {
+                        setIsEditModalOpen(false);
+                        setEditingAmount(0);
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </Dialog.Panel>
               </Transition.Child>
             </div>

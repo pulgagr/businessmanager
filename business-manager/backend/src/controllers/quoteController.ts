@@ -84,34 +84,50 @@ export const updateQuote = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { product, platform, status, cost, chargedAmount, amountPaid, notes, paymentMethod } = req.body;
     
+    // Validate status
+    const validStatuses = ['quote', 'quoted', 'purchase', 'purchased', 'received', 'ready_to_ship', 'held', 'shipped', 'paid'];
+    if (status && !validStatuses.includes(status)) {
+      return res.status(400).json({ message: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
+    }
+    
+    // Build update data object with only the fields that are provided
+    const updateData: any = {};
+    
+    if (product !== undefined) updateData.product = product;
+    if (platform !== undefined) updateData.platform = platform;
+    if (status !== undefined) updateData.status = status;
+    if (cost !== undefined) updateData.cost = parseFloat(cost);
+    if (chargedAmount !== undefined) updateData.chargedAmount = parseFloat(chargedAmount);
+    if (amountPaid !== undefined) updateData.amountPaid = parseFloat(amountPaid);
+    if (notes !== undefined) updateData.notes = notes;
+    if (paymentMethod !== undefined) updateData.paymentMethod = paymentMethod;
+    
+    // Check if we have any data to update
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({ message: 'No valid fields provided for update' });
+    }
+    
     const quote = await prisma.quote.update({
       where: { id: parseInt(id) },
-      data: {
-        product,
-        platform,
-        status,
-        cost: parseFloat(cost),
-        chargedAmount: parseFloat(chargedAmount),
-        amountPaid: amountPaid ? parseFloat(amountPaid) : undefined,
-        notes,
-        paymentMethod
-      }
+      data: updateData
     });
 
     // Create activity for status change
-    await prisma.activity.create({
-      data: {
-        quoteId: quote.id,
-        type: status === 'paid' ? 'Payment Received' : `Status changed to ${status}`,
-        amount: amountPaid ? parseFloat(amountPaid) : parseFloat(chargedAmount),
-        status: status === 'paid' ? 'completed' : 'pending'
-      }
-    });
+    if (status) {
+      await prisma.activity.create({
+        data: {
+          quoteId: quote.id,
+          type: status === 'paid' ? 'Payment Received' : `Status changed to ${status}`,
+          amount: amountPaid ? parseFloat(amountPaid) : quote.chargedAmount,
+          status: status === 'paid' ? 'completed' : 'pending'
+        }
+      });
+    }
 
     res.json(quote);
   } catch (error) {
     console.error('Error updating quote:', error);
-    res.status(500).json({ message: 'Error updating quote' });
+    res.status(500).json({ message: 'Error updating quote', error: error instanceof Error ? error.message : 'Unknown error' });
   }
 };
 

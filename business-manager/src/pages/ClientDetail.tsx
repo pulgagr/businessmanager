@@ -1,7 +1,7 @@
 import { useState, useEffect, Fragment } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeftIcon, UserCircleIcon, PhoneIcon, EnvelopeIcon, BuildingOfficeIcon, PlusIcon, ChevronDownIcon, PencilIcon, XMarkIcon, DocumentTextIcon, ChartBarIcon, TruckIcon } from '@heroicons/react/24/outline';
-import { clientApi, quoteApi, settingsApi } from '../services/api';
+import { clientApi, quoteApi, settingsApi, trackingApi } from '../services/api';
 import { Dialog, Transition } from '@headlessui/react';
 import FormModal from '../components/FormModal';
 import ConfirmationModal from '../components/ConfirmationModal';
@@ -44,7 +44,7 @@ interface Quote {
   client: Omit<ClientResponse, 'quotes' | 'trackings'>;
   product: string;
   platform: string;
-  status: 'quote' | 'quoted' | 'purchase' | 'purchased' | 'received' | 'paid';
+  status: 'quote' | 'quoted' | 'purchase' | 'purchased' | 'received' | 'ready_to_ship' | 'held' | 'shipped' | 'paid';
   cost: number;
   chargedAmount: number;
   amountPaid: number;
@@ -63,6 +63,7 @@ interface Tracking {
   declaredValue: number;
   shippingCost: number;
   totalValue: number;
+  amountPaid: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -87,6 +88,9 @@ const ClientDetail = () => {
   const [editingQuoteId, setEditingQuoteId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showEditClientModal, setShowEditClientModal] = useState(false);
+  const [editClientForm, setEditClientForm] = useState<Partial<Client>>({});
+  const [statusUpdating, setStatusUpdating] = useState(false);
   const [newQuoteForm, setNewQuoteForm] = useState<NewQuoteForm>({
     product: '',
     platform: '',
@@ -118,6 +122,10 @@ const ClientDetail = () => {
     shipments: Tracking[];
     selectedStatuses: string[];
   } | null>(null);
+  const [selectedTracking, setSelectedTracking] = useState<Tracking | null>(null);
+  const [showTrackingModal, setShowTrackingModal] = useState(false);
+  const [showDeleteTrackingModal, setShowDeleteTrackingModal] = useState(false);
+  const [deletingTrackingId, setDeletingTrackingId] = useState<string | null>(null);
 
   // Status options for the dropdown
   const statusOptions = [
@@ -126,6 +134,9 @@ const ClientDetail = () => {
     { value: 'purchase', label: 'Purchase Needed' },
     { value: 'purchased', label: 'Purchased' },
     { value: 'received', label: 'Received' },
+    { value: 'ready_to_ship', label: 'Ready to Ship' },
+    { value: 'held', label: 'Held' },
+    { value: 'shipped', label: 'Shipped' },
     { value: 'paid', label: 'Paid' },
   ];
 
@@ -447,6 +458,108 @@ const ClientDetail = () => {
     );
   };
 
+  // Add function to handle tracking row click
+  const handleTrackingRowClick = (tracking: Tracking) => {
+    setSelectedTracking(tracking);
+    setShowTrackingModal(true);
+  };
+
+  // Add function to handle tracking deletion
+  const handleDeleteTracking = async () => {
+    if (!deletingTrackingId) return;
+    
+    try {
+      await trackingApi.delete(deletingTrackingId);
+      
+      // Update client state to remove the deleted tracking
+      if (client) {
+        setClient({
+          ...client,
+          trackings: client.trackings.filter(t => t.id !== deletingTrackingId)
+        });
+      }
+      
+      setShowDeleteTrackingModal(false);
+      setDeletingTrackingId(null);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete shipment');
+    }
+  };
+
+  // Toggle client status between active and inactive
+  const handleToggleClientStatus = async () => {
+    if (!client || statusUpdating) return;
+    
+    const newStatus = client.status === 'active' ? 'inactive' : 'active';
+    
+    try {
+      setStatusUpdating(true);
+      const response = await clientApi.update(client.id, { status: newStatus });
+      
+      // Update client in state with new status
+      setClient({
+        ...client,
+        status: newStatus
+      });
+      
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update client status');
+    } finally {
+      setStatusUpdating(false);
+    }
+  };
+
+  // Open edit client modal with current client data
+  const handleEditClient = () => {
+    if (!client) return;
+    
+    setEditClientForm({
+      name: client.name,
+      email: client.email,
+      phone: client.phone,
+      company: client.company,
+      idNumber: client.idNumber,
+      address: client.address,
+      city: client.city,
+      state: client.state,
+      zipCode: client.zipCode,
+      country: client.country,
+      taxId: client.taxId
+    });
+    
+    setShowEditClientModal(true);
+  };
+
+  // Handle edit client form field changes
+  const handleEditClientChange = (field: keyof Client, value: string) => {
+    setEditClientForm({
+      ...editClientForm,
+      [field]: value
+    });
+  };
+
+  // Save client edits
+  const handleSaveClientEdit = async () => {
+    if (!client) return;
+    
+    try {
+      const response = await clientApi.update(client.id, editClientForm);
+      
+      // Update client in state with updated data
+      setClient({
+        ...client,
+        ...editClientForm
+      });
+      
+      setShowEditClientModal(false);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update client information');
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-full flex items-center justify-center">
@@ -522,11 +635,27 @@ const ClientDetail = () => {
                 <p className="mt-1 text-base text-gray-600">{client?.company}</p>
               </div>
             </div>
-            <span className={`px-4 py-2 inline-flex text-sm font-semibold rounded-full ${
-              client?.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-            }`}>
-              {client?.status}
-            </span>
+            <div className="flex items-center space-x-4">
+              <button 
+                onClick={handleToggleClientStatus}
+                disabled={statusUpdating}
+                className={`px-4 py-2 inline-flex text-sm font-semibold rounded-full transition-colors duration-150 ${
+                  client?.status === 'active' 
+                  ? 'bg-green-100 text-green-800 hover:bg-green-200' 
+                  : 'bg-red-100 text-red-800 hover:bg-red-200'
+                }`}
+              >
+                {statusUpdating ? 'Updating...' : (client?.status === 'active' ? 'Active' : 'Inactive')}
+              </button>
+              <button
+                type="button"
+                onClick={handleEditClient}
+                className="inline-flex items-center rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+              >
+                <PencilIcon className="-ml-1 mr-2 h-5 w-5 text-gray-400" aria-hidden="true" />
+                Edit Client
+              </button>
+            </div>
           </div>
         </div>
         
@@ -778,12 +907,19 @@ const ClientDetail = () => {
                 <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
                   Total
                 </th>
+                <th scope="col" className="relative py-3.5 pl-3 pr-4 sm:pr-6">
+                  <span className="sr-only">Actions</span>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 bg-white">
               {client?.trackings && client.trackings.length > 0 ? (
                 client.trackings.map((tracking) => (
-                  <tr key={tracking.id.toString()}>
+                  <tr 
+                    key={tracking.id.toString()} 
+                    onClick={() => handleTrackingRowClick(tracking)}
+                    className="cursor-pointer hover:bg-gray-50"
+                  >
                     <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm sm:pl-6">
                       <div className="font-medium text-gray-900">
                         {new Date(tracking.createdAt).toLocaleDateString()}
@@ -795,10 +931,10 @@ const ClientDetail = () => {
                     <td className="whitespace-nowrap px-3 py-4 text-sm">
                       <span className={`inline-flex rounded-full px-2 text-xs font-semibold leading-5 ${
                         tracking.status === 'delivered'
-                          ? 'bg-green-100 text-green-800'
+                          ? 'bg-gradient-to-r from-green-50 to-green-100 text-green-800 border border-green-200'
                           : tracking.status === 'in_transit'
-                          ? 'bg-blue-100 text-blue-800'
-                          : 'bg-yellow-100 text-yellow-800'
+                          ? 'bg-gradient-to-r from-indigo-50 to-indigo-100 text-indigo-800 border border-indigo-200'
+                          : 'bg-gradient-to-r from-emerald-50 to-emerald-100 text-emerald-800 border border-emerald-200'
                       }`}>
                         {tracking.status === 'delivered'
                           ? 'Delivered'
@@ -817,11 +953,14 @@ const ClientDetail = () => {
                     <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
                       ${tracking.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     </td>
+                    <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
+                      
+                    </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={5}>
+                  <td colSpan={6}>
                     <div className="flex flex-col items-center justify-center py-12">
                       <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-600 shadow-lg shadow-emerald-200">
                         <TruckIcon className="h-6 w-6 text-white" aria-hidden="true" />
@@ -898,6 +1037,238 @@ const ClientDetail = () => {
           />
         </div>
       )}
+
+      {/* Tracking details modal */}
+      <Dialog
+        as="div"
+        className="relative z-10"
+        open={showTrackingModal}
+        onClose={() => setShowTrackingModal(false)}
+      >
+        <div className="fixed inset-0 bg-black bg-opacity-25" />
+        <div className="fixed inset-0 overflow-y-auto">
+          <div className="flex min-h-full items-center justify-center p-4 text-center">
+            <Dialog.Panel className="w-full max-w-lg transform overflow-hidden rounded-2xl bg-white p-6 text-left align-middle shadow-xl transition-all">
+              <Dialog.Title as="h3" className="text-lg font-medium leading-6 text-gray-900">
+                Shipment Details
+              </Dialog.Title>
+              {selectedTracking && (
+                <div className="mt-4">
+                  <div className="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                      <p className="text-sm font-medium text-gray-500">Tracking Number</p>
+                      <p className="text-base font-medium text-gray-900">{selectedTracking.trackingNumber}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-500">Status</p>
+                      <p className="text-base font-medium text-gray-900">{selectedTracking.status}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-500">Shipping Cost</p>
+                      <p className="text-base font-medium text-gray-900">
+                        ${selectedTracking.shippingCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-500">Total Value</p>
+                      <p className="text-base font-medium text-gray-900">
+                        ${selectedTracking.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-500">Created Date</p>
+                      <p className="text-base font-medium text-gray-900">
+                        {new Date(selectedTracking.createdAt).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-500">Declared Value</p>
+                      <p className="text-base font-medium text-gray-900">
+                        ${selectedTracking.declaredValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="mb-4">
+                    <p className="text-sm font-medium text-gray-500 mb-2">Items</p>
+                    <div className="bg-gray-50 rounded-lg p-3 max-h-40 overflow-y-auto">
+                      {selectedTracking.quotes.length > 0 ? (
+                        <ul className="divide-y divide-gray-200">
+                          {selectedTracking.quotes.map(quote => (
+                            <li key={quote.id} className="py-2">
+                              <div className="flex justify-between">
+                                <span className="text-sm font-medium text-gray-900">{quote.product}</span>
+                                <span className="text-sm text-gray-500">
+                                  ${quote.chargedAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                </span>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-sm text-gray-500">No items associated with this shipment</p>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <div className="mt-6 flex justify-end space-x-3">
+                    <button
+                      type="button"
+                      className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                      onClick={() => setShowTrackingModal(false)}
+                    >
+                      Close
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-xl border border-transparent bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+                      onClick={() => {
+                        setShowTrackingModal(false);
+                        setDeletingTrackingId(selectedTracking.id);
+                        setShowDeleteTrackingModal(true);
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              )}
+            </Dialog.Panel>
+          </div>
+        </div>
+      </Dialog>
+
+      {/* Deletion confirmation modal */}
+      <ConfirmationModal
+        isOpen={showDeleteTrackingModal}
+        onClose={() => {
+          setShowDeleteTrackingModal(false);
+          setDeletingTrackingId(null);
+        }}
+        onConfirm={handleDeleteTracking}
+        title="Delete Shipment"
+        description="Are you sure you want to delete this shipment? This action cannot be undone."
+        type="delete"
+      />
+
+      {/* Edit Client Modal */}
+      <FormModal
+        isOpen={showEditClientModal}
+        onClose={() => setShowEditClientModal(false)}
+        onSubmit={handleSaveClientEdit}
+        title="Edit Client Information"
+        description="Update the client's contact and business details."
+        submitLabel="Save Changes"
+      >
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 gap-6">
+            <InputField
+              id="name"
+              name="name"
+              label="Full Name"
+              value={editClientForm.name || ''}
+              onChange={(e) => handleEditClientChange('name', e.target.value)}
+              placeholder="Enter client's full name"
+              required
+            />
+            <InputField
+              id="company"
+              name="company"
+              label="Company Name"
+              value={editClientForm.company || ''}
+              onChange={(e) => handleEditClientChange('company', e.target.value)}
+              placeholder="Enter company name"
+              required
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-6">
+            <InputField
+              id="email"
+              name="email"
+              label="Email Address"
+              type="email"
+              value={editClientForm.email || ''}
+              onChange={(e) => handleEditClientChange('email', e.target.value)}
+              placeholder="client@example.com"
+              required
+            />
+            <InputField
+              id="phone"
+              name="phone"
+              label="Phone Number"
+              value={editClientForm.phone || ''}
+              onChange={(e) => handleEditClientChange('phone', e.target.value)}
+              placeholder="Enter phone number"
+              required
+            />
+          </div>
+
+          <InputField
+            id="address"
+            name="address"
+            label="Address"
+            value={editClientForm.address || ''}
+            onChange={(e) => handleEditClientChange('address', e.target.value)}
+            placeholder="Enter street address"
+          />
+
+          <div className="grid grid-cols-3 gap-6">
+            <InputField
+              id="city"
+              name="city"
+              label="City"
+              value={editClientForm.city || ''}
+              onChange={(e) => handleEditClientChange('city', e.target.value)}
+              placeholder="Enter city"
+            />
+            <InputField
+              id="state"
+              name="state"
+              label="State/Province"
+              value={editClientForm.state || ''}
+              onChange={(e) => handleEditClientChange('state', e.target.value)}
+              placeholder="Enter state/province"
+            />
+            <InputField
+              id="zipCode"
+              name="zipCode"
+              label="ZIP/Postal Code"
+              value={editClientForm.zipCode || ''}
+              onChange={(e) => handleEditClientChange('zipCode', e.target.value)}
+              placeholder="Enter ZIP code"
+            />
+          </div>
+
+          <InputField
+            id="country"
+            name="country"
+            label="Country"
+            value={editClientForm.country || ''}
+            onChange={(e) => handleEditClientChange('country', e.target.value)}
+            placeholder="Enter country"
+          />
+
+          <div className="grid grid-cols-2 gap-6">
+            <InputField
+              id="taxId"
+              name="taxId"
+              label="Tax ID"
+              value={editClientForm.taxId || ''}
+              onChange={(e) => handleEditClientChange('taxId', e.target.value)}
+              placeholder="Enter tax ID"
+            />
+            <InputField
+              id="idNumber"
+              name="idNumber"
+              label="ID Number"
+              value={editClientForm.idNumber || ''}
+              onChange={(e) => handleEditClientChange('idNumber', e.target.value)}
+              placeholder="Enter ID number"
+            />
+          </div>
+        </div>
+      </FormModal>
     </div>
   );
 };

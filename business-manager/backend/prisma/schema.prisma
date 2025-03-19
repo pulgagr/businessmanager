@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -14,40 +8,40 @@ datasource db {
 }
 
 model Quote {
-  id            Int      @id @default(autoincrement())
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  client        Client   @relation(fields: [clientId], references: [id])
+  id            Int        @id @default(autoincrement())
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
   clientId      Int
   product       String
   platform      String
   status        String
   cost          Float
   chargedAmount Float
-  amountPaid    Float   @default(0)
-  paymentMethod String?
   notes         String?
-  activities    Activity[]
-  tracking      Tracking?  @relation(fields: [trackingId], references: [id])
+  amountPaid    Float      @default(0)
+  paymentMethod String?
   trackingId    Int?
+  activities    Activity[]
+  client        Client     @relation(fields: [clientId], references: [id])
+  tracking      Tracking?  @relation(fields: [trackingId], references: [id])
 }
 
 model Client {
-  id        Int      @id @default(autoincrement())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id        Int        @id @default(autoincrement())
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
   name      String
-  email     String   @unique
+  email     String     @unique
   phone     String?
   company   String?
-  status    String   @default("active")
-  idNumber  String?
+  status    String     @default("active")
   address   String?
   city      String?
-  state     String?
-  zipCode   String?
   country   String?
+  idNumber  String?
+  state     String?
   taxId     String?
+  zipCode   String?
   quotes    Quote[]
   trackings Tracking[]
 }
@@ -55,42 +49,56 @@ model Client {
 model Activity {
   id        Int      @id @default(autoincrement())
   createdAt DateTime @default(now())
-  quote     Quote    @relation(fields: [quoteId], references: [id])
   quoteId   Int
   type      String
   amount    Float
   status    String
+  quote     Quote    @relation(fields: [quoteId], references: [id])
 }
 
 model Settings {
   id                   Int      @id @default(autoincrement())
-  companyName         String
-  email               String
-  phone               String
-  address             String
-  taxRate             Float
-  currency            String
-  defaultPlatformFee  Float
-  notificationEmail   String
+  companyName          String
+  email                String
+  phone                String
+  address              String
+  taxRate              Float
+  currency             String
+  defaultPlatformFee   Float
+  notificationEmail    String
   autoGenerateInvoices Boolean
-  platformOptions     String[]
-  paymentOptions      String[]
-  logoUrl             String?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  platformOptions      String[]
+  paymentOptions       String[]
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  logoUrl              String?
 }
 
 model Tracking {
   id             Int      @id @default(autoincrement())
   trackingNumber String   @unique
-  quotes         Quote[]
-  client         Client   @relation(fields: [clientId], references: [id])
-  clientId       Int
-  status         String   @default("pending")
   declaredValue  Float
   shippingCost   Float
   totalValue     Float
-  amountPaid     Float    @default(0)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+  clientId       Int
+  status         String   @default("pending")
+  amountPaid     Float    @default(0)
+  quotes         Quote[]
+  client         Client   @relation(fields: [clientId], references: [id])
+}
+
+model User {
+  id              Int       @id @default(autoincrement())
+  email           String    @unique
+  name            String
+  passwordHash    String
+  role            String    @default("user") // Options: admin, user
+  lastLogin       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  refreshToken    String?   // For JWT refresh token
+  resetToken      String?   // For password reset
+  resetTokenExpiry DateTime?
 }

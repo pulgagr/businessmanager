@@ -84,11 +84,17 @@ export const createTracking = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Tracking number already exists' });
     }
 
+    // Parse clientId to ensure it's a number
+    const parsedClientId = parseInt(clientId.toString());
+    if (isNaN(parsedClientId)) {
+      return res.status(400).json({ message: 'Invalid client ID format' });
+    }
+
     // @ts-ignore - Prisma types issue with tracking model
     const tracking = await prisma.tracking.create({
       data: {
         trackingNumber,
-        clientId: parseInt(clientId.toString()),
+        clientId: parsedClientId,
         status: status || 'pending',
         declaredValue: parseFloat(declaredValue.toString()),
         shippingCost: parseFloat(shippingCost.toString()),
@@ -145,12 +151,18 @@ export const updateTracking = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Tracking number already exists' });
     }
 
+    // Parse clientId to ensure it's a number
+    const parsedClientId = parseInt(clientId.toString());
+    if (isNaN(parsedClientId)) {
+      return res.status(400).json({ message: 'Invalid client ID format' });
+    }
+
     // @ts-ignore - Prisma types issue with tracking model
     const tracking = await prisma.tracking.update({
       where: { id: parseInt(id) },
       data: {
         trackingNumber,
-        clientId: parseInt(clientId.toString()),
+        clientId: parsedClientId,
         status: status || undefined,
         declaredValue: parseFloat(declaredValue.toString()),
         shippingCost: parseFloat(shippingCost.toString()),
@@ -187,8 +199,11 @@ export const updateTrackingStatus = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { status } = req.body;
 
-    if (!status || !['pending', 'in_transit', 'delivered', 'paid'].includes(status)) {
-      return res.status(400).json({ message: 'Valid status is required (pending, in_transit, delivered, or paid)' });
+    const validStatuses = ['pending', 'in_transit', 'delivered', 'received', 'ready_to_ship', 'held', 'shipped', 'paid'];
+    if (!status || !validStatuses.includes(status)) {
+      return res.status(400).json({ 
+        message: `Valid status is required. Must be one of: ${validStatuses.join(', ')}` 
+      });
     }
 
     // Find the tracking to get its totalValue if we're marking it as paid
